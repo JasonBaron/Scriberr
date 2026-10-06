@@ -319,13 +319,13 @@ func (p *PyAnnoteAdapter) Diarize(ctx context.Context, input interfaces.AudioInp
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 
 	// Setup log file
-	logFile, err := os.OpenFile(filepath.Join(procCtx.OutputDirectory, "transcription.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		logger.Warn("Failed to create log file", "error", err)
+	// Job log: transcript text is omitted unless SCRIBERR_LOG_TRANSCRIPTS=true
+	if logW, closeLog, logErr := OpenJobLog(procCtx.OutputDirectory); logErr != nil {
+		logger.Warn("Failed to create log file", "error", logErr)
 	} else {
-		defer logFile.Close()
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
+		defer closeLog()
+		cmd.Stdout = logW
+		cmd.Stderr = logW
 	}
 
 	logger.Info("Executing PyAnnote command", "args", strings.Join(args, " "))

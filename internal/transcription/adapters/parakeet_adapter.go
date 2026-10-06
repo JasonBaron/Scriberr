@@ -388,13 +388,13 @@ func (p *ParakeetAdapter) transcribeStandard(ctx context.Context, input interfac
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 
 	// Setup log file
-	logFile, err := os.OpenFile(filepath.Join(outputDir, "transcription.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		logger.Warn("Failed to create log file", "error", err)
+	// Job log: transcript text is omitted unless SCRIBERR_LOG_TRANSCRIPTS=true
+	if logW, closeLog, logErr := OpenJobLog(outputDir); logErr != nil {
+		logger.Warn("Failed to create log file", "error", logErr)
 	} else {
-		defer logFile.Close()
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
+		defer closeLog()
+		cmd.Stdout = logW
+		cmd.Stderr = logW
 	}
 
 	logger.Info("Executing Parakeet command", "args", strings.Join(args, " "))
@@ -437,13 +437,13 @@ func (p *ParakeetAdapter) transcribeBuffered(ctx context.Context, input interfac
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 
 	// Setup log file
-	logFile, err := os.OpenFile(filepath.Join(outputDir, "transcription.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		logger.Warn("Failed to create log file", "error", err)
+	// Job log: transcript text is omitted unless SCRIBERR_LOG_TRANSCRIPTS=true
+	if logW, closeLog, logErr := OpenJobLog(outputDir); logErr != nil {
+		logger.Warn("Failed to create log file", "error", logErr)
 	} else {
-		defer logFile.Close()
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
+		defer closeLog()
+		cmd.Stdout = logW
+		cmd.Stderr = logW
 	}
 
 	logger.Info("Executing Parakeet buffered inference", "args", strings.Join(args, " "))
