@@ -466,7 +466,7 @@ func (u *UnifiedTranscriptionService) processSingleTrackJob(
 		if err := u.saveTranscriptionResults(job.ID, transcriptResult); err != nil {
 			return fmt.Errorf("failed to save transcription results: %w", err)
 		}
-		jl.Done(transcriptNote(transcriptResult))
+		jl.Done("saved to database")
 	} else {
 		jl.Done("no transcript to save")
 	}

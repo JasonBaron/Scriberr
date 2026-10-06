@@ -377,7 +377,7 @@ func (w *WhisperXAdapter) updateWhisperXDependencies(whisperxPath string) error 
 
 // uvSyncWhisperX runs uv sync for WhisperX
 func (w *WhisperXAdapter) uvSyncWhisperX(whisperxPath string) error {
-	cmd := exec.Command("uv", "sync", "--all-extras", "--dev", "--native-tls")
+	cmd := exec.Command("uv", "sync", "--all-extras", "--dev", UVTLSFlag)
 	cmd.Dir = whisperxPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -503,7 +503,7 @@ func (w *WhisperXAdapter) buildWhisperXArgs(input interfaces.AudioInput, params 
 	whisperxPath := filepath.Join(w.envPath, "WhisperX")
 
 	args := []string{
-		"run", "--native-tls", "--project", whisperxPath, "python", "-m", "whisperx",
+		"run", UVTLSFlag, "--project", whisperxPath, "python", "-m", "whisperx",
 		input.FilePath,
 		"--output_dir", outputDir,
 	}

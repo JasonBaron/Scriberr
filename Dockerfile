@@ -74,7 +74,9 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 # Install uv (fast Python package manager) directly to system PATH
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+# Pinned so an upstream uv release cannot change behaviour under us; bump deliberately
+ARG UV_VERSION=0.12.23
+RUN curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh \
   && cp /root/.local/bin/uv /usr/local/bin/uv \
   && chmod 755 /usr/local/bin/uv \
   && uv --version

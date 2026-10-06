@@ -20,6 +20,11 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// UVTLSFlag makes uv use the system certificate store (the image's CA bundle).
+// uv renamed --native-tls to --system-certs and will remove the old name; the
+// image pins a uv version that supports the new one (see Dockerfile UV_VERSION).
+const UVTLSFlag = "--system-certs"
+
 // Environment readiness cache to avoid repeated expensive UV checks
 var (
 	envCacheMutex sync.RWMutex
@@ -66,7 +71,7 @@ func CheckEnvironmentReady(envPath, importStatement string) bool {
 		envCacheMutex.RUnlock()
 
 		// Run the actual check
-		testCmd := exec.Command("uv", "run", "--native-tls", "--project", envPath, "python", "-c", importStatement)
+		testCmd := exec.Command("uv", "run", UVTLSFlag, "--project", envPath, "python", "-c", importStatement)
 		ready := testCmd.Run() == nil
 
 		// Cache the result
