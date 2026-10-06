@@ -13,6 +13,7 @@ import { Upload, Clock, CheckCircle, XCircle, FileAudio, Zap } from "lucide-reac
 import { useTranscriptionProfiles, useQuickTranscription } from "@/features/transcription/hooks/useAudioFiles";
 import type { Profile } from "@/features/transcription/hooks/useAudioFiles";
 import { useAuth } from "@/features/auth/hooks/useAuth";
+import { isAudioFile, AUDIO_ACCEPT } from "@/utils/fileProcessor";
 
 
 
@@ -87,7 +88,7 @@ export function QuickTranscriptionDialog({ isOpen, onClose }: QuickTranscription
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file && file.type.startsWith("audio/")) {
+    if (file && isAudioFile(file)) {
       setSelectedFile(file);
       setStep("profile");
     }
@@ -230,7 +231,7 @@ export function QuickTranscriptionDialog({ isOpen, onClose }: QuickTranscription
             <input
               ref={fileInputRef}
               type="file"
-              accept="audio/*"
+              accept={AUDIO_ACCEPT}
               onChange={handleFileChange}
               className="hidden"
             />

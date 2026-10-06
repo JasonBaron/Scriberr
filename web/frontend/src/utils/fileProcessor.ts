@@ -16,24 +16,41 @@ interface MultiTrackFiles {
 	title: string;
 }
 
+// Extensions decide the type first. Mobile browsers report .m4a inconsistently
+// (audio/mp4, audio/x-m4a, video/mp4, or empty), so the MIME type is only a fallback.
+export const AUDIO_EXTENSIONS = ['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg'];
+export const VIDEO_EXTENSIONS = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'];
+
 /**
- * Detects if a file is an audio file
+ * Value for <input accept>. Lists extensions and m4a MIME aliases explicitly so
+ * iOS/Android pickers don't grey out .m4a files (e.g. Voice Memos recordings).
  */
-export const isAudioFile = (file: File): boolean => {
-	return file.type.startsWith('audio/') || 
-		   ['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg'].some(ext => 
-			   file.name.toLowerCase().endsWith(ext)
-		   );
+export const AUDIO_ACCEPT = ['audio/*', ...AUDIO_EXTENSIONS, 'audio/mp4', 'audio/x-m4a', 'audio/aac'].join(',');
+
+const extensionOf = (name: string): string => {
+	const i = name.lastIndexOf('.');
+	return i >= 0 ? name.slice(i).toLowerCase() : '';
 };
 
 /**
- * Detects if a file is a video file
+ * Detects if a file is an audio file. A known audio extension (.m4a included)
+ * is always audio, even when the browser labels it video/mp4.
+ */
+export const isAudioFile = (file: File): boolean => {
+	const ext = extensionOf(file.name);
+	if (AUDIO_EXTENSIONS.includes(ext)) return true;
+	if (VIDEO_EXTENSIONS.includes(ext)) return false;
+	return file.type.startsWith('audio/');
+};
+
+/**
+ * Detects if a file is a video file. Files with an audio extension are never video.
  */
 export const isVideoFile = (file: File): boolean => {
-	return file.type.startsWith('video/') || 
-		   ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'].some(ext => 
-			   file.name.toLowerCase().endsWith(ext)
-		   );
+	const ext = extensionOf(file.name);
+	if (AUDIO_EXTENSIONS.includes(ext)) return false;
+	if (VIDEO_EXTENSIONS.includes(ext)) return true;
+	return file.type.startsWith('video/');
 };
 
 /**
