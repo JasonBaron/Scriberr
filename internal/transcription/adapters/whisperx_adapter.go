@@ -65,7 +65,7 @@ func NewWhisperXAdapter(envPath string) *WhisperXAdapter {
 			Type:        "string",
 			Required:    false,
 			Default:     "small",
-			Options:     []string{"tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large", "large-v1", "large-v2", "large-v3"},
+			Options:     []string{"tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large", "large-v1", "large-v2", "large-v3", "large-v3-turbo"},
 			Description: "Whisper model size to use",
 			Group:       "basic",
 		},
@@ -287,7 +287,7 @@ func (w *WhisperXAdapter) GetSupportedModels() []string {
 		"base", "base.en",
 		"small", "small.en",
 		"medium", "medium.en",
-		"large", "large-v1", "large-v2", "large-v3",
+		"large", "large-v1", "large-v2", "large-v3", "large-v3-turbo",
 	}
 }
 
@@ -444,16 +444,22 @@ func (w *WhisperXAdapter) Transcribe(ctx context.Context, input interfaces.Audio
 		logger.Debug("Updated LD_LIBRARY_PATH for WhisperX", "path", newPath)
 	}
 
+	// HuggingFace token: job parameter first, then the container's HF_TOKEN.
+	// WhisperX/pyannote read HF_TOKEN from the environment when --hf_token is absent.
+	if hfToken := w.GetStringParameter(params, "hf_token"); hfToken != "" {
+		env = setEnv(env, "HF_TOKEN", hfToken)
+	}
+
 	cmd.Env = append(env, "PYTHONUNBUFFERED=1")
 
 	// Setup log file
-	logFile, err := os.OpenFile(filepath.Join(procCtx.OutputDirectory, "transcription.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		logger.Warn("Failed to create log file", "error", err)
+	// Job log: transcript text is omitted unless SCRIBERR_LOG_TRANSCRIPTS=true
+	if logW, closeLog, logErr := OpenJobLog(procCtx.OutputDirectory); logErr != nil {
+		logger.Warn("Failed to create log file", "error", logErr)
 	} else {
-		defer logFile.Close()
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
+		defer closeLog()
+		cmd.Stdout = logW
+		cmd.Stderr = logW
 	}
 
 	logger.Info("Executing WhisperX command", "args", strings.Join(args, " "))
@@ -557,14 +563,9 @@ func (w *WhisperXAdapter) buildWhisperXArgs(input interfaces.AudioInput, params 
 	args = append(args, "--beam_size", strconv.Itoa(w.GetIntParameter(params, "beam_size")))
 	args = append(args, "--patience", fmt.Sprintf("%.2f", w.GetFloatParameter(params, "patience")))
 
-	// HuggingFace token - use param first, then fall back to environment variable
-	hfToken := w.GetStringParameter(params, "hf_token")
-	if hfToken == "" {
-		hfToken = os.Getenv("HF_TOKEN")
-	}
-	if hfToken != "" {
-		args = append(args, "--hf_token", hfToken)
-	}
+	// HuggingFace token is passed via the HF_TOKEN environment variable (see
+	// Transcribe), never on the command line where ps/docker top and
+	// the "Executing WhisperX command" log line would expose it.
 
 	// Disable print progress for cleaner output
 	args = append(args, "--print_progress", "False")

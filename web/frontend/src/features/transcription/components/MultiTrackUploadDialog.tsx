@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { AUDIO_ACCEPT } from "@/utils/fileProcessor";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -165,7 +166,7 @@ export function MultiTrackUploadDialog({
 								<input
 									type="file"
 									multiple
-									accept="audio/*,.aup"
+									accept={`${AUDIO_ACCEPT},.aup`}
 									onChange={handleFileSelect}
 									className="hidden"
 									id="file-upload"

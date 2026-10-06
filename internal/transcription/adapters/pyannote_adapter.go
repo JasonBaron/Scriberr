@@ -187,6 +187,19 @@ func (p *PyAnnoteAdapter) PrepareEnvironment(ctx context.Context) error {
 		return fmt.Errorf("failed to create diarization script: %w", err)
 	}
 
+	// Keep pyproject.toml in step with the embedded copy so dependency pins
+	// (such as torchcodec) reach existing environments, not just new ones.
+	changed, err := p.writePyproject()
+	if err != nil {
+		return fmt.Errorf("failed to write pyproject.toml: %w", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(p.envPath, ".venv")); changed && statErr == nil {
+		logger.Info("PyAnnote dependencies changed, re-syncing environment")
+		if err := p.syncEnvironment(); err != nil {
+			logger.Warn("PyAnnote re-sync failed", "error", err)
+		}
+	}
+
 	// Check if PyAnnote is already available (using cache to speed up repeated checks)
 	if CheckEnvironmentReady(p.envPath, "from pyannote.audio import Pipeline") {
 		logger.Info("PyAnnote already available in environment")
@@ -220,10 +233,24 @@ func (p *PyAnnoteAdapter) setupPyAnnoteEnvironment() error {
 		return fmt.Errorf("failed to create pyannote directory: %w", err)
 	}
 
-	// Read pyproject.toml for PyAnnote
+	if _, err := p.writePyproject(); err != nil {
+		return err
+	}
+
+	logger.Info("Installing PyAnnote dependencies")
+	return p.syncEnvironment()
+}
+
+// writePyproject writes the embedded pyproject.toml (with the PyTorch wheel URL for
+// this environment) into the env directory. It reports whether the file changed.
+func (p *PyAnnoteAdapter) writePyproject() (bool, error) {
+	if err := os.MkdirAll(p.envPath, 0755); err != nil {
+		return false, fmt.Errorf("failed to create pyannote directory: %w", err)
+	}
+
 	pyprojectContent, err := pyannoteScripts.ReadFile("py/pyannote/pyproject.toml")
 	if err != nil {
-		return fmt.Errorf("failed to read embedded pyproject.toml: %w", err)
+		return false, fmt.Errorf("failed to read embedded pyproject.toml: %w", err)
 	}
 
 	// Replace the hardcoded PyTorch URL with the dynamic one based on environment
@@ -236,19 +263,23 @@ func (p *PyAnnoteAdapter) setupPyAnnoteEnvironment() error {
 	)
 
 	pyprojectPath := filepath.Join(p.envPath, "pyproject.toml")
-	if err := os.WriteFile(pyprojectPath, []byte(contentStr), 0644); err != nil {
-		return fmt.Errorf("failed to write pyproject.toml: %w", err)
+	if existing, err := os.ReadFile(pyprojectPath); err == nil && string(existing) == contentStr {
+		return false, nil
 	}
+	if err := os.WriteFile(pyprojectPath, []byte(contentStr), 0644); err != nil {
+		return false, fmt.Errorf("failed to write pyproject.toml: %w", err)
+	}
+	return true, nil
+}
 
-	// Run uv sync
-	logger.Info("Installing PyAnnote dependencies")
+// syncEnvironment runs uv sync in the PyAnnote env directory.
+func (p *PyAnnoteAdapter) syncEnvironment() error {
 	cmd := exec.Command("uv", "sync", "--native-tls")
 	cmd.Dir = p.envPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("uv sync failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-
 	return nil
 }
 
@@ -316,16 +347,16 @@ func (p *PyAnnoteAdapter) Diarize(ctx context.Context, input interfaces.AudioInp
 
 	// Execute PyAnnote
 	cmd := exec.CommandContext(ctx, "uv", args...)
-	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+	cmd.Env = append(setEnv(os.Environ(), "HF_TOKEN", p.GetStringParameter(params, "hf_token")), "PYTHONUNBUFFERED=1")
 
 	// Setup log file
-	logFile, err := os.OpenFile(filepath.Join(procCtx.OutputDirectory, "transcription.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		logger.Warn("Failed to create log file", "error", err)
+	// Job log: transcript text is omitted unless SCRIBERR_LOG_TRANSCRIPTS=true
+	if logW, closeLog, logErr := OpenJobLog(procCtx.OutputDirectory); logErr != nil {
+		logger.Warn("Failed to create log file", "error", logErr)
 	} else {
-		defer logFile.Close()
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
+		defer closeLog()
+		cmd.Stdout = logW
+		cmd.Stderr = logW
 	}
 
 	logger.Info("Executing PyAnnote command", "args", strings.Join(args, " "))
@@ -379,7 +410,7 @@ func (p *PyAnnoteAdapter) buildPyAnnoteArgs(input interfaces.AudioInput, params 
 		"run", "--native-tls", "--project", p.envPath, "python", scriptPath,
 		input.FilePath,
 		"--output", outputFile,
-		"--hf-token", p.GetStringParameter(params, "hf_token"),
+		// HF token is passed via the HF_TOKEN environment variable, not argv
 	}
 
 	// Add model

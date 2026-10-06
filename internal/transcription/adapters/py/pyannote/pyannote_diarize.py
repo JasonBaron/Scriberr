@@ -215,8 +215,8 @@ def main():
     )
     parser.add_argument(
         "--hf-token",
-        required=True,
-        help="Hugging Face access token"
+        default=os.environ.get("HF_TOKEN"),
+        help="Hugging Face access token (defaults to the HF_TOKEN environment variable)"
     )
     parser.add_argument(
         "--model",
@@ -257,6 +257,10 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if not args.hf_token:
+        print("Error: Hugging Face token missing. Set HF_TOKEN or pass --hf-token.")
+        sys.exit(1)
 
     # Validate input file
     if not os.path.exists(args.audio_file):

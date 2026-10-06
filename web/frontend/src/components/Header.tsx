@@ -15,7 +15,7 @@ import { QuickTranscriptionDialog } from "@/features/transcription/components/Qu
 import { YouTubeDownloadDialog } from "@/features/transcription/components/YouTubeDownloadDialog";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/features/auth/hooks/useAuth";
-import { isVideoFile, isAudioFile } from "../utils/fileProcessor";
+import { isVideoFile, isAudioFile, AUDIO_ACCEPT } from "../utils/fileProcessor";
 import { useGlobalUpload } from "@/contexts/GlobalUploadContext";
 
 interface FileWithType {
@@ -118,7 +118,7 @@ export function Header({ onFileSelect, onMultiTrackClick, onDownloadComplete }: 
 		const files = event.target.files;
 		if (files && files.length > 0) {
 			// Filter to only video files
-			const videoFiles = Array.from(files).filter(file => file.type.startsWith("video/"));
+			const videoFiles = Array.from(files).filter(file => isVideoFile(file));
 			if (videoFiles.length > 0) {
 				// Pass video files with type marker
 				const filesWithType: FileWithType[] = videoFiles.map(file => ({ file, isVideo: true }));
@@ -295,7 +295,7 @@ export function Header({ onFileSelect, onMultiTrackClick, onDownloadComplete }: 
 					<input
 						ref={fileInputRef}
 						type="file"
-						accept="audio/*"
+						accept={AUDIO_ACCEPT}
 						multiple
 						onChange={handleFileChange}
 						className="hidden"

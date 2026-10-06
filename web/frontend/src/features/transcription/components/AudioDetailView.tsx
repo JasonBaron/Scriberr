@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
-import { MoreVertical, Edit2, Activity, FileText, Bot, Check, Loader2, List, AlignLeft, ArrowDownCircle, StickyNote, MessageCircle, FileImage, FileJson, Clock, AlertCircle, Users } from "lucide-react";
+import { MoreVertical, Edit2, Activity, FileText, Bot, Check, Loader2, List, AlignLeft, ArrowDownCircle, StickyNote, MessageCircle, FileImage, FileJson, Clock, AlertCircle, Users, ClipboardCopy } from "lucide-react";
 import { Header } from "@/components/Header";
 
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input";
 import { EmberPlayer, type EmberPlayerRef } from "@/components/audio/EmberPlayer";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 // Custom Hooks
-import { useAudioDetail, useUpdateTitle, useTranscript, type TranscriptSegment } from "@/features/transcription/hooks/useAudioDetail";
+import { useAudioDetail, usePipelineStatus, useUpdateTitle, useTranscript, type TranscriptSegment } from "@/features/transcription/hooks/useAudioDetail";
 import { useSpeakerMappings } from "@/features/transcription/hooks/useTranscriptionSpeakers";
 import { useTranscriptDownload } from "@/features/transcription/hooks/useTranscriptDownload";
 
@@ -33,6 +34,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
     const { audioId: paramAudioId } = useParams<{ audioId: string }>();
     const audioId = propAudioId || paramAudioId;
     const navigate = useNavigate();
+    const { toast } = useToast();
 
     // Refs
     const audioPlayerRef = useRef<EmberPlayerRef>(null);
@@ -58,13 +60,14 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
 
     // Data Fetching
     const { data: audioFile, isLoading, error } = useAudioDetail(audioId || "");
+    const { data: pipelineStatus } = usePipelineStatus(audioId || "", !!audioId);
     const { mutate: updateTitle } = useUpdateTitle(audioId || "");
     // Fetch transcript & speakers here to support menu actions
     const { data: transcript } = useTranscript(audioId || "", true);
     const { data: speakerMappings = {} } = useSpeakerMappings(audioId || "", true);
 
     // Download Logic
-    const { downloadSRT } = useTranscriptDownload();
+    const { downloadSRT, copyText } = useTranscriptDownload();
 
     // State for Split View
     const [chatOpen, setChatOpen] = useState(false);
@@ -174,6 +177,22 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
         year: "numeric"
     }).toUpperCase();
 
+    const stage = pipelineStatus?.status?.stage;
+    const pipelineProgress = pipelineStatus?.status?.progress;
+    const pipelineMessage = pipelineStatus?.status?.step_message;
+    const stageLabel = stage
+        ? ({
+            queued: "Queued",
+            preprocessing: "Preprocessing",
+            transcribing: "Transcribing",
+            diarizing: "Diarizing",
+            merging: "Merging",
+            persisting: "Saving",
+            completed: "Completed",
+            failed: "Failed",
+        } as Record<string, string>)[stage] || stage
+        : undefined;
+
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-main)] relative selection:bg-[var(--brand-light)] overflow-hidden">
             {/* Split Container */}
@@ -220,6 +239,12 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                             {/* Badges */}
                                             <div className="flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
                                                 <span>{formattedDate}</span>
+                                                {stageLabel && (audioFile.status === "processing" || audioFile.status === "pending") && (
+                                                    <>
+                                                        <span className="w-1 h-1 rounded-full bg-[var(--text-tertiary)] opacity-50"></span>
+                                                        <span>{stageLabel}</span>
+                                                    </>
+                                                )}
                                                 <span className="w-1 h-1 rounded-full bg-[var(--text-tertiary)] opacity-50"></span>
 
                                                 {/* Status Icon */}
@@ -266,6 +291,20 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                                     )}
                                                 </div>
                                             </div>
+                                            {(audioFile.status === "processing" || audioFile.status === "pending") && typeof pipelineProgress === "number" && (
+                                                <div className="mt-2 max-w-xs">
+                                                    <div className="h-1.5 rounded-full bg-gray-200 dark:bg-zinc-700 overflow-hidden">
+                                                        <div
+                                                            className="h-full bg-[#FF6D20] transition-all duration-300"
+                                                            style={{ width: `${Math.max(0, Math.min(100, pipelineProgress))}%` }}
+                                                        />
+                                                    </div>
+                                                    <div className="mt-1 text-[11px] text-[var(--text-tertiary)] normal-case tracking-normal flex items-center justify-between">
+                                                        <span>{Math.round(pipelineProgress)}%</span>
+                                                        {pipelineMessage && <span className="truncate max-w-[16rem]">{pipelineMessage}</span>}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Action Menu */}
@@ -332,6 +371,23 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                                         <Bot className="mr-2 h-4 w-4" /> AI Summary
                                                     </DropdownMenuItem>
                                                     <DropdownMenuSeparator className="bg-[var(--border-subtle)] my-1" />
+                                                    <DropdownMenuItem
+                                                        onClick={async () => {
+                                                            if (!transcript) return;
+                                                            const success = await copyText(transcript, speakerMappings, {
+                                                                includeTimestamps: false,
+                                                                includeSpeakerLabels: true,
+                                                            });
+                                                            if (success) {
+                                                                toast({ title: "Transcript copied to clipboard" });
+                                                            } else {
+                                                                toast({ title: "Copy failed", description: "Clipboard access was denied" });
+                                                            }
+                                                        }}
+                                                        className="rounded-[8px] cursor-pointer"
+                                                    >
+                                                        <ClipboardCopy className="mr-2 h-4 w-4 opacity-70" /> Copy to Clipboard
+                                                    </DropdownMenuItem>
                                                     <DropdownMenuItem onClick={() => transcript && downloadSRT(transcript, audioFile?.title || 'transcript', speakerMappings)} className="rounded-[8px] cursor-pointer">
                                                         <FileImage className="mr-2 h-4 w-4 opacity-70" /> Download SRT
                                                     </DropdownMenuItem>

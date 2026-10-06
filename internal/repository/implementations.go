@@ -3,10 +3,22 @@ package repository
 import (
 	"context"
 	"scriberr/internal/models"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+// transcriptionJobSortColumns are the columns ListWithParams allows sorting
+// by. sortBy is a caller-supplied query param, so it has to be checked
+// against a fixed set before use rather than passed straight into ORDER BY.
+var transcriptionJobSortColumns = map[string]bool{
+	"created_at": true,
+	"updated_at": true,
+	"title":      true,
+	"status":     true,
+	"audio_path": true,
+}
 
 // UserRepository handles user-specific database operations
 type UserRepository interface {
@@ -52,6 +64,7 @@ type JobRepository interface {
 	Repository[models.TranscriptionJob]
 	FindWithAssociations(ctx context.Context, id string) (*models.TranscriptionJob, error)
 	FindActiveTrackJobs(ctx context.Context, parentJobID string) ([]models.TranscriptionJob, error)
+	FindLatestExecution(ctx context.Context, jobID string) (*models.TranscriptionJobExecution, error)
 	FindLatestCompletedExecution(ctx context.Context, jobID string) (*models.TranscriptionJobExecution, error)
 	ListWithParams(ctx context.Context, offset, limit int, sortBy, sortOrder, searchQuery string, updatedAfter *time.Time) ([]models.TranscriptionJob, int64, error)
 	ListByUser(ctx context.Context, userID uint, offset, limit int) ([]models.TranscriptionJob, int64, error)
@@ -111,12 +124,15 @@ func (r *jobRepository) ListWithParams(ctx context.Context, offset, limit int, s
 		return nil, 0, err
 	}
 
-	// Apply sorting
-	if sortBy != "" {
-		if sortOrder == "" {
-			sortOrder = "desc"
+	// Apply sorting. sortBy and sortOrder come straight from query params, so
+	// they're checked against a fixed set of values before being used to
+	// build the ORDER BY clause, instead of being concatenated in directly.
+	if transcriptionJobSortColumns[sortBy] {
+		direction := "desc"
+		if strings.EqualFold(sortOrder, "asc") {
+			direction = "asc"
 		}
-		db = db.Order(sortBy + " " + sortOrder)
+		db = db.Order(sortBy + " " + direction)
 	} else {
 		// Default sort
 		db = db.Order("created_at desc")
@@ -174,6 +190,18 @@ func (r *jobRepository) FindLatestCompletedExecution(ctx context.Context, jobID 
 	var execution models.TranscriptionJobExecution
 	err := r.db.WithContext(ctx).
 		Where("transcription_job_id = ? AND status = ?", jobID, models.StatusCompleted).
+		Order("created_at DESC").
+		First(&execution).Error
+	if err != nil {
+		return nil, err
+	}
+	return &execution, nil
+}
+
+func (r *jobRepository) FindLatestExecution(ctx context.Context, jobID string) (*models.TranscriptionJobExecution, error) {
+	var execution models.TranscriptionJobExecution
+	err := r.db.WithContext(ctx).
+		Where("transcription_job_id = ?", jobID).
 		Order("created_at DESC").
 		First(&execution).Error
 	if err != nil {
