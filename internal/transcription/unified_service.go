@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"scriberr/internal/joblog"
 	"scriberr/internal/models"
 	"scriberr/internal/repository"
 	"scriberr/internal/sse"
@@ -179,6 +180,19 @@ func (u *UnifiedTranscriptionService) ProcessJob(ctx context.Context, jobID stri
 
 	u.emitPipelineUpdate(ctx, execution, models.StageQueued, 0, "Job accepted by worker", nil)
 
+	// Structured, human-readable job log (served by View Logs)
+	jl := joblog.Open(filepath.Join(u.outputDirectory, jobID), jobID)
+	jl.Header(
+		joblog.Field{Key: "Title", Value: strOr(job.Title, "")},
+		joblog.Field{Key: "Audio", Value: audioSummary(job.AudioPath)},
+	)
+	jl.Section("PRE-FLIGHT",
+		joblog.Field{Key: "GPU", Value: joblog.GPUInfo()},
+		joblog.Field{Key: "uv", Value: joblog.UVVersion()},
+		joblog.Field{Key: "HF token", Value: hfTokenStatus(job.Parameters)},
+		joblog.Field{Key: "Profile", Value: profileSummary(job.Parameters)},
+	)
+
 	// Broadcast initial processing status
 	if u.broadcaster != nil {
 		u.broadcaster.Broadcast(jobID, "job_update", map[string]interface{}{
@@ -255,22 +269,27 @@ func (u *UnifiedTranscriptionService) ProcessJob(ctx context.Context, jobID stri
 	if job.IsMultiTrack && job.Parameters.IsMultiTrackEnabled {
 		u.emitPipelineUpdate(ctx, execution, models.StagePreprocessing, 10, "Preparing multi-track merge", nil)
 		logger.Info("Processing multi-track job", "job_id", jobID)
+		jl.SetTotalStages(1)
+		jl.Stage(fmt.Sprintf("Processing %d tracks", len(job.MultiTrackFiles)))
 		if err := u.processMultiTrackJob(ctx, job, execution); err != nil {
 			errMsg := fmt.Sprintf("multi-track processing failed: %v", err)
+			jl.Finish(err)
 			updateExecutionStatus(models.StatusFailed, errMsg)
 			return fmt.Errorf("%s", errMsg)
 		}
 	} else {
 		u.emitPipelineUpdate(ctx, execution, models.StagePreprocessing, 10, "Preparing audio input", nil)
 		// Process single track
-		if err := u.processSingleTrackJob(ctx, job, execution); err != nil {
+		if err := u.processSingleTrackJob(ctx, job, execution, jl); err != nil {
 			errMsg := fmt.Sprintf("single-track processing failed: %v", err)
+			jl.Finish(err)
 			updateExecutionStatus(models.StatusFailed, errMsg)
 			return fmt.Errorf("%s", errMsg)
 		}
 	}
 
 	// Success
+	jl.Finish(nil)
 	updateExecutionStatus(models.StatusCompleted, "")
 	logger.Info("Job processed successfully", "job_id", jobID, "duration", time.Since(startTime))
 	return nil
@@ -283,6 +302,7 @@ func (u *UnifiedTranscriptionService) processSingleTrackJob(
 	ctx context.Context,
 	job *models.TranscriptionJob,
 	execution *models.TranscriptionJobExecution,
+	jl *joblog.Log,
 ) error {
 	logger.Info("Processing single-track job", "job_id", job.ID, "model_family", job.Parameters.ModelFamily)
 
@@ -299,17 +319,31 @@ func (u *UnifiedTranscriptionService) processSingleTrackJob(
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Create audio input
-	audioInput, err := u.createAudioInput(job.AudioPath)
-	if err != nil {
-		return fmt.Errorf("failed to create audio input: %w", err)
-	}
-
 	// Determine models to use first
 	transcriptionModelID, diarizationModelID, err := u.selectModels(job.Parameters)
 	if err != nil {
 		return fmt.Errorf("failed to select models: %w", err)
 	}
+
+	// Plan job log stages: prepare audio, [transcribe], [separate diarization], save
+	separateDiarization := job.Parameters.Diarize && diarizationModelID != "" &&
+		!u.transcriptionIncludesDiarization(transcriptionModelID, job.Parameters)
+	totalStages := 2
+	if transcriptionModelID != "" {
+		totalStages++
+	}
+	if separateDiarization {
+		totalStages++
+	}
+	jl.SetTotalStages(totalStages)
+	jl.Stage("Preparing audio")
+
+	// Create audio input
+	audioInput, err := u.createAudioInput(job.AudioPath)
+	if err != nil {
+		return fmt.Errorf("failed to create audio input: %w", err)
+	}
+	jl.SetAudioSeconds(audioInput.Duration.Seconds())
 
 	// Apply preprocessing to ensure audio is in correct format (mono 16kHz)
 	var preprocessedInput interfaces.AudioInput
@@ -330,6 +364,7 @@ func (u *UnifiedTranscriptionService) processSingleTrackJob(
 	// Apply preprocessing
 	u.emitPipelineUpdate(ctx, execution, models.StagePreprocessing, 15, "Normalizing audio format", nil)
 	preprocessedInput, err = u.pipeline.ProcessAudio(ctx, audioInput, capabilities)
+	jl.Done(audioNote(audioInput, preprocessedInput, err))
 	if err != nil {
 		logger.Warn("Audio preprocessing failed, using original", "error", err)
 		preprocessedInput = audioInput
@@ -365,6 +400,11 @@ func (u *UnifiedTranscriptionService) processSingleTrackJob(
 	if transcriptionModelID != "" {
 		u.emitPipelineUpdate(ctx, execution, models.StageTranscribing, 30, "Running transcription model", nil)
 		logger.Info("Running transcription", "model_id", transcriptionModelID)
+		stageName := fmt.Sprintf("Transcribing (%s %s)", transcriptionModelID, job.Parameters.Model)
+		if job.Parameters.Diarize && !separateDiarization {
+			stageName = fmt.Sprintf("Transcribing + diarizing (%s %s)", transcriptionModelID, job.Parameters.Model)
+		}
+		jl.Stage(stageName)
 		transcriptionAdapter, err := u.registry.GetTranscriptionAdapter(transcriptionModelID)
 		if err != nil {
 			return fmt.Errorf("failed to get transcription adapter: %w", err)
@@ -382,6 +422,7 @@ func (u *UnifiedTranscriptionService) processSingleTrackJob(
 		if err != nil {
 			return fmt.Errorf("transcription failed: %w", err)
 		}
+		jl.Done(transcriptNote(transcriptResult))
 	}
 
 	// Perform diarization if requested and not already done by transcription
@@ -392,6 +433,7 @@ func (u *UnifiedTranscriptionService) processSingleTrackJob(
 		if !u.transcriptionIncludesDiarization(transcriptionModelID, job.Parameters) {
 			u.emitPipelineUpdate(ctx, execution, models.StageDiarizing, 70, "Running speaker diarization", nil)
 			logger.Info("Running separate diarization", "model_id", diarizationModelID)
+			jl.Stage(fmt.Sprintf("Diarizing (%s)", diarizationModelID))
 			diarizationAdapter, err := u.registry.GetDiarizationAdapter(diarizationModelID)
 			if err != nil {
 				return fmt.Errorf("failed to get diarization adapter: %w", err)
@@ -407,6 +449,7 @@ func (u *UnifiedTranscriptionService) processSingleTrackJob(
 			if err != nil {
 				return fmt.Errorf("diarization failed: %w", err)
 			}
+			jl.Done(diarizationNote(diarizationResult))
 
 			// Merge diarization results with transcription
 			if transcriptResult != nil && diarizationResult != nil {
@@ -417,11 +460,15 @@ func (u *UnifiedTranscriptionService) processSingleTrackJob(
 	}
 
 	// Save results to database
+	jl.Stage("Saving transcript")
 	if transcriptResult != nil {
 		u.emitPipelineUpdate(ctx, execution, models.StagePersisting, 95, "Finalizing outputs", nil)
 		if err := u.saveTranscriptionResults(job.ID, transcriptResult); err != nil {
 			return fmt.Errorf("failed to save transcription results: %w", err)
 		}
+		jl.Done(transcriptNote(transcriptResult))
+	} else {
+		jl.Done("no transcript to save")
 	}
 
 	return nil
