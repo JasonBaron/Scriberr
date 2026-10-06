@@ -20,7 +20,7 @@ RUN cd frontend \
 ########################
 # Go build stage
 ########################
-FROM golang:1.24-bookworm AS go-builder
+FROM golang:1.26-bookworm AS go-builder
 WORKDIR /src
 
 # Pre-cache modules
@@ -68,6 +68,7 @@ WORKDIR /app
 # System deps: curl for uv install, ca-certs, ffmpeg for yt-dlp, git for git+ installs, gosu for user switching
 # Ubuntu 24.04 comes with Python 3.12 which works fine with WhisperX
 RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   curl ca-certificates ffmpeg git gosu unzip \
   build-essential gcc g++ make python3-dev \
@@ -77,6 +78,7 @@ RUN apt-get update \
 # Install uv (fast Python package manager) directly to system PATH
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
   && cp /root/.local/bin/uv /usr/local/bin/uv \
+  && rm -f /root/.local/bin/uv /root/.local/bin/uvx \
   && chmod 755 /usr/local/bin/uv \
   && uv --version
 
