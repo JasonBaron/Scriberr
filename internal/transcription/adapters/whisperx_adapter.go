@@ -444,6 +444,12 @@ func (w *WhisperXAdapter) Transcribe(ctx context.Context, input interfaces.Audio
 		logger.Debug("Updated LD_LIBRARY_PATH for WhisperX", "path", newPath)
 	}
 
+	// HuggingFace token: job parameter first, then the container's HF_TOKEN.
+	// WhisperX/pyannote read HF_TOKEN from the environment when --hf_token is absent.
+	if hfToken := w.GetStringParameter(params, "hf_token"); hfToken != "" {
+		env = setEnv(env, "HF_TOKEN", hfToken)
+	}
+
 	cmd.Env = append(env, "PYTHONUNBUFFERED=1")
 
 	// Setup log file
@@ -557,14 +563,9 @@ func (w *WhisperXAdapter) buildWhisperXArgs(input interfaces.AudioInput, params 
 	args = append(args, "--beam_size", strconv.Itoa(w.GetIntParameter(params, "beam_size")))
 	args = append(args, "--patience", fmt.Sprintf("%.2f", w.GetFloatParameter(params, "patience")))
 
-	// HuggingFace token - use param first, then fall back to environment variable
-	hfToken := w.GetStringParameter(params, "hf_token")
-	if hfToken == "" {
-		hfToken = os.Getenv("HF_TOKEN")
-	}
-	if hfToken != "" {
-		args = append(args, "--hf_token", hfToken)
-	}
+	// HuggingFace token is passed via the HF_TOKEN environment variable (see
+	// Transcribe), never on the command line where ps/docker top and
+	// the "Executing WhisperX command" log line would expose it.
 
 	// Disable print progress for cleaner output
 	args = append(args, "--print_progress", "False")

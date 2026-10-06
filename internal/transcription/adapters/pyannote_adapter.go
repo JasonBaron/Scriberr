@@ -316,7 +316,7 @@ func (p *PyAnnoteAdapter) Diarize(ctx context.Context, input interfaces.AudioInp
 
 	// Execute PyAnnote
 	cmd := exec.CommandContext(ctx, "uv", args...)
-	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+	cmd.Env = append(setEnv(os.Environ(), "HF_TOKEN", p.GetStringParameter(params, "hf_token")), "PYTHONUNBUFFERED=1")
 
 	// Setup log file
 	// Job log: transcript text is omitted unless SCRIBERR_LOG_TRANSCRIPTS=true
@@ -379,7 +379,7 @@ func (p *PyAnnoteAdapter) buildPyAnnoteArgs(input interfaces.AudioInput, params 
 		"run", "--native-tls", "--project", p.envPath, "python", scriptPath,
 		input.FilePath,
 		"--output", outputFile,
-		"--hf-token", p.GetStringParameter(params, "hf_token"),
+		// HF token is passed via the HF_TOKEN environment variable, not argv
 	}
 
 	// Add model
