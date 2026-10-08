@@ -17,6 +17,12 @@ export interface AudioFile {
     individual_transcripts?: any;
     speakers?: number;
     duration?: number;
+    suggested_tags?: string[];
+    tags?: string[];
+    tags_edited?: boolean;
+    summary_brief?: string;
+    recorded_at?: string;
+    recorded_at_source?: string;
 }
 
 export interface AudioFilesResponse {
@@ -119,6 +125,8 @@ export function useAudioUpload() {
 
             formData.append(fieldName, file);
             formData.append('title', file.name.replace(/\.[^/.]+$/, ''));
+            // Fallback recording time when the file has no date tag
+            if (file.lastModified) formData.append('last_modified', String(file.lastModified));
 
             const response = await fetch(endpoint, {
                 method: 'POST',

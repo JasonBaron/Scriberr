@@ -145,6 +145,8 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 			transcription.GET("/:id/track-progress", handler.GetTrackProgress)
 			transcription.PUT("/:id/title", handler.UpdateTranscriptionTitle)
 			transcription.GET("/:id/summary", handler.GetSummaryForTranscription)
+			transcription.GET("/:id/summaries", handler.ListSummariesForTranscription)
+			transcription.PUT("/:id/tags", handler.UpdateTranscriptionTags)
 			transcription.GET("/:id", handler.GetTranscriptionJob)
 			transcription.DELETE("/:id", handler.DeleteTranscriptionJob)
 			transcription.GET("/list", handler.ListTranscriptionJobs)
@@ -237,6 +239,9 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 			notes.PUT("/:note_id", handler.UpdateNote)
 			notes.DELETE("/:note_id", handler.DeleteNote)
 		}
+
+		// Tags in use (require authentication)
+		v1.GET("/tags", middleware.AuthMiddleware(authService), handler.ListTags)
 
 		// Summarization route (require authentication)
 		summarize := v1.Group("/summarize")

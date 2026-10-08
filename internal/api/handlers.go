@@ -277,6 +277,7 @@ func (h *Handler) UploadAudio(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
 		return
 	}
+	recordedAt, recordedAtSource := recordedAtForUpload(c, filePath)
 
 	// Check if file is .webm and convert to MP3
 	// WebM files from browser MediaRecorder often lack proper duration metadata,
@@ -310,9 +311,11 @@ func (h *Handler) UploadAudio(c *gin.Context) {
 	jobID = jobID[:len(jobID)-len(filepath.Ext(jobID))] // Extract ID from filename
 
 	job := models.TranscriptionJob{
-		ID:        jobID,
-		AudioPath: filePath,
-		Status:    models.StatusUploaded,
+		ID:               jobID,
+		AudioPath:        filePath,
+		Status:           models.StatusUploaded,
+		RecordedAt:       recordedAt,
+		RecordedAtSource: recordedAtSource,
 	}
 
 	if title := c.PostForm(paramTitle); title != "" {
@@ -401,6 +404,7 @@ func (h *Handler) UploadVideo(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
 		return
 	}
+	recordedAt, recordedAtSource := recordedAtForUpload(c, videoPath)
 
 	// Generate job ID from filename
 	jobID := filepath.Base(videoPath)
@@ -417,9 +421,11 @@ func (h *Handler) UploadVideo(c *gin.Context) {
 
 	// Create job record
 	job := models.TranscriptionJob{
-		ID:        jobID,
-		AudioPath: audioPath, // Use the extracted audio path
-		Status:    models.StatusUploaded,
+		ID:               jobID,
+		AudioPath:        audioPath, // Use the extracted audio path
+		Status:           models.StatusUploaded,
+		RecordedAt:       recordedAt,
+		RecordedAtSource: recordedAtSource,
 	}
 
 	if title := c.PostForm(paramTitle); title != "" {
@@ -719,6 +725,7 @@ func (h *Handler) SubmitJob(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
 		return
 	}
+	recordedAt, recordedAtSource := recordedAtForUpload(c, filePath)
 
 	// Generate job ID from filename
 	jobID := filepath.Base(filePath)
@@ -772,11 +779,13 @@ func (h *Handler) SubmitJob(c *gin.Context) {
 
 	// Create job
 	job := models.TranscriptionJob{
-		ID:          jobID,
-		AudioPath:   filePath,
-		Status:      models.StatusPending,
-		Diarization: diarize,
-		Parameters:  params,
+		ID:               jobID,
+		AudioPath:        filePath,
+		Status:           models.StatusPending,
+		Diarization:      diarize,
+		Parameters:       params,
+		RecordedAt:       recordedAt,
+		RecordedAtSource: recordedAtSource,
 	}
 
 	if title := c.PostForm(paramTitle); title != "" {

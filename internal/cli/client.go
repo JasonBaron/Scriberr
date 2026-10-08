@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // UploadFile uploads a file to the Scriberr server
@@ -39,6 +40,14 @@ func UploadFile(filePath string) error {
 	// Add title as filename
 	if err := writer.WriteField("title", filepath.Base(filePath)); err != nil {
 		return fmt.Errorf("failed to write title field: %w", err)
+	}
+
+	// The file's modified time stands in for the recording time when the
+	// file carries no date tag.
+	if info, err := file.Stat(); err == nil {
+		if err := writer.WriteField("last_modified", strconv.FormatInt(info.ModTime().UnixMilli(), 10)); err != nil {
+			return fmt.Errorf("failed to write last_modified field: %w", err)
+		}
 	}
 
 	err = writer.Close()

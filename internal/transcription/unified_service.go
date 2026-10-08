@@ -336,6 +336,14 @@ func (u *UnifiedTranscriptionService) processSingleTrackJob(
 		totalStages++
 	}
 	jl.SetTotalStages(totalStages)
+
+	// One GPU job at a time; frees Ollama and waits for memory if needed
+	releaseGPU, err := acquireGPU(ctx, jl, job.Parameters.Device)
+	if err != nil {
+		return fmt.Errorf("waiting for GPU: %w", err)
+	}
+	defer releaseGPU()
+
 	jl.Stage("Preparing audio")
 
 	// Create audio input

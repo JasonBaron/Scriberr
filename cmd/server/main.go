@@ -16,6 +16,7 @@ import (
 	"scriberr/internal/auth"
 	"scriberr/internal/config"
 	"scriberr/internal/database"
+	"scriberr/internal/gpu"
 	"scriberr/internal/processing"
 	"scriberr/internal/queue"
 	"scriberr/internal/repository"
@@ -161,6 +162,10 @@ func main() {
 		multiTrackProcessor,
 		broadcaster,
 	)
+
+	// Free Ollama's GPU memory before each transcription
+	gpu.OnBeforeTranscription(handler.UnloadLocalLLM)
+	queue.OnJobCompleted(handler.AutoSummarize)
 
 	// Set up router. Until model environments are ready, /health reports
 	// "starting" and API writes return 503 (see internal/api/startup.go).

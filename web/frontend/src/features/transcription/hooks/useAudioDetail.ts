@@ -60,6 +60,13 @@ export interface AudioFile {
     merged_audio_path?: string;
     merge_status?: string;
     merge_error?: string;
+    suggested_title?: string;
+    suggested_tags?: string[];
+    tags?: string[];
+    tags_edited?: boolean;
+    summary_brief?: string;
+    recorded_at?: string;
+    recorded_at_source?: string;
     parameters?: {
         diarize?: boolean;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

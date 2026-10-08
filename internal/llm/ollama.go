@@ -76,16 +76,47 @@ func (s *OllamaService) numCtx(ctx context.Context, model string, messages []Cha
 }
 
 // modelMaxContext returns the model's trained context length (cached), or 0.
-func (s *OllamaService) modelMaxContext(ctx context.Context, model string) int {
+// modelInfo is what Scriberr needs from /api/show, cached per model.
+type modelInfo struct {
+	contextLength int
+	capabilities  []string
+}
+
+func (s *OllamaService) info(ctx context.Context, model string) *modelInfo {
 	if v, ok := s.ctxCache.Load(model); ok {
-		return v.(int)
+		return v.(*modelInfo)
 	}
-	n, found := s.showContextLength(ctx, model)
+	mi, found := s.showModel(ctx, model)
 	if !found {
-		return 0
+		return &modelInfo{}
 	}
-	s.ctxCache.Store(model, n)
-	return n
+	s.ctxCache.Store(model, mi)
+	return mi
+}
+
+func (s *OllamaService) modelMaxContext(ctx context.Context, model string) int {
+	return s.info(ctx, model).contextLength
+}
+
+// SupportsThinking reports whether the model lists the "thinking" capability
+// (qwen3, deepseek-r1 and similar). Older Ollama versions do not report
+// capabilities; then this is false and no think flag is sent.
+func (s *OllamaService) SupportsThinking(ctx context.Context, model string) bool {
+	for _, c := range s.info(ctx, model).capabilities {
+		if c == "thinking" {
+			return true
+		}
+	}
+	return false
+}
+
+// thinkFlag returns the think value to send, or nil to leave the model default.
+func (s *OllamaService) thinkFlag(ctx context.Context, model string) *bool {
+	want, set := ThinkingFrom(ctx)
+	if !set || !s.SupportsThinking(ctx, model) {
+		return nil
+	}
+	return &want
 }
 
 func (s *OllamaService) requestOptions(ctx context.Context, model string, messages []ChatMessage, temperature float64) map[string]any {
@@ -156,6 +187,9 @@ type ollamaChatRequest struct {
 	Messages []ollamaChatMessage `json:"messages"`
 	Stream   bool                `json:"stream"`
 	Options  map[string]any      `json:"options,omitempty"`
+	// Think is only sent to models that report the "thinking" capability;
+	// whether other models accept it is not documented.
+	Think *bool `json:"think,omitempty"`
 }
 
 type ollamaChatResponse struct {
@@ -180,6 +214,7 @@ func (s *OllamaService) ChatCompletion(ctx context.Context, model string, messag
 		Stream:   false,
 	}
 	reqBody.Options = s.requestOptions(ctx, model, messages, temperature)
+	reqBody.Think = s.thinkFlag(ctx, model)
 	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -234,6 +269,7 @@ func (s *OllamaService) ChatCompletionStream(ctx context.Context, model string, 
 		}
 		reqBody := ollamaChatRequest{Model: model, Messages: msgs, Stream: true}
 		reqBody.Options = s.requestOptions(ctx, model, messages, temperature)
+		reqBody.Think = s.thinkFlag(ctx, model)
 
 		data, err := json.Marshal(reqBody)
 		if err != nil {
@@ -306,8 +342,9 @@ type ollamaShowRequest struct {
 
 // ollamaShowResponse represents the response from show model info
 type ollamaShowResponse struct {
-	ModelInfo map[string]interface{} `json:"model_info"`
-	Details   struct {
+	Capabilities []string               `json:"capabilities"`
+	ModelInfo    map[string]interface{} `json:"model_info"`
+	Details      struct {
 		ContextLength int `json:"context_length"` // Some versions return this
 	} `json:"details"`
 	Parameters string `json:"parameters"`
@@ -330,48 +367,126 @@ func (s *OllamaService) GetContextWindow(ctx context.Context, model string) (int
 	return limit, nil
 }
 
-// showContextLength asks Ollama for the model's context length.
-func (s *OllamaService) showContextLength(ctx context.Context, model string) (int, bool) {
+// showModel asks Ollama for the model's context length and capabilities.
+func (s *OllamaService) showModel(ctx context.Context, model string) (*modelInfo, bool) {
 	data, err := json.Marshal(ollamaShowRequest{Name: model})
 	if err != nil {
-		return 0, false
+		return nil, false
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST", s.baseURL+"/api/show", bytes.NewBuffer(data))
 	if err != nil {
-		return 0, false
+		return nil, false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return 0, false
+		return nil, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return 0, false
+		return nil, false
 	}
 	var showResp ollamaShowResponse
 	if err := json.NewDecoder(resp.Body).Decode(&showResp); err != nil {
-		return 0, false
+		return nil, false
 	}
+
+	mi := &modelInfo{capabilities: showResp.Capabilities}
 
 	// The format varies by Ollama version: model_info["<arch>.context_length"],
 	// details.context_length, or "num_ctx N" in the parameters string.
 	for k, v := range showResp.ModelInfo {
 		if strings.HasSuffix(k, "context_length") {
 			if f, ok := v.(float64); ok && f > 0 {
-				return int(f), true
+				mi.contextLength = int(f)
+				return mi, true
 			}
 		}
 	}
 	if showResp.Details.ContextLength > 0 {
-		return showResp.Details.ContextLength, true
+		mi.contextLength = showResp.Details.ContextLength
+		return mi, true
 	}
 	for _, line := range strings.Split(showResp.Parameters, "\n") {
 		if f := strings.Fields(line); len(f) >= 2 && f[0] == "num_ctx" {
 			if n, err := strconv.Atoi(f[1]); err == nil && n > 0 {
-				return n, true
+				mi.contextLength = n
+				return mi, true
 			}
 		}
 	}
-	return 0, false
+	return mi, true
+}
+
+// LoadedModels lists models Ollama currently holds in memory (/api/ps).
+func (s *OllamaService) LoadedModels(ctx context.Context) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", s.baseURL+"/api/ps", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ollama /api/ps: status %d", resp.StatusCode)
+	}
+	var ps struct {
+		Models []struct {
+			Name  string `json:"name"`
+			Model string `json:"model"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&ps); err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, m := range ps.Models {
+		if m.Model != "" {
+			names = append(names, m.Model)
+		} else if m.Name != "" {
+			names = append(names, m.Name)
+		}
+	}
+	return names, nil
+}
+
+// Unload asks Ollama to free a model's memory now (keep_alive 0).
+func (s *OllamaService) Unload(ctx context.Context, model string) error {
+	data, err := json.Marshal(map[string]any{"model": model, "keep_alive": 0})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", s.baseURL+"/api/generate", bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ollama unload %s: status %d", model, resp.StatusCode)
+	}
+	return nil
+}
+
+// UnloadAll frees every model Ollama has loaded and returns their names.
+func (s *OllamaService) UnloadAll(ctx context.Context) ([]string, error) {
+	names, err := s.LoadedModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var unloaded []string
+	for _, n := range names {
+		if err := s.Unload(ctx, n); err != nil {
+			return unloaded, err
+		}
+		unloaded = append(unloaded, n)
+	}
+	return unloaded, nil
 }

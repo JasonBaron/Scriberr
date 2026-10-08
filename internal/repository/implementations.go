@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"scriberr/internal/models"
+	"sort"
 	"strings"
 	"time"
 
@@ -75,6 +76,7 @@ type JobRepository interface {
 	DeleteMultiTrackFilesByJobID(ctx context.Context, jobID string) error
 	UpdateStatus(ctx context.Context, jobID string, status models.JobStatus) error
 	UpdateError(ctx context.Context, jobID string, errorMsg string) error
+	SetRecordedAt(ctx context.Context, jobID string, recordedAt time.Time, source string) error
 	FindByStatus(ctx context.Context, status models.JobStatus) ([]models.TranscriptionJob, error)
 	CountByStatus(ctx context.Context, status models.JobStatus) (int64, error)
 	UpdateSummary(ctx context.Context, jobID string, summary string) error
@@ -116,7 +118,7 @@ func (r *jobRepository) ListWithParams(ctx context.Context, offset, limit int, s
 	// Apply search filter
 	if searchQuery != "" {
 		search := "%" + searchQuery + "%"
-		db = db.Where("title LIKE ? OR audio_path LIKE ?", search, search)
+		db = db.Where("title LIKE ? OR audio_path LIKE ? OR tags LIKE ?", search, search, search)
 	}
 
 	// Count total matching records
@@ -216,6 +218,12 @@ func (r *jobRepository) UpdateStatus(ctx context.Context, jobID string, status m
 
 func (r *jobRepository) UpdateError(ctx context.Context, jobID string, errorMsg string) error {
 	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).Update("error_message", errorMsg).Error
+}
+
+// SetRecordedAt stores when the audio was recorded and where that came from.
+func (r *jobRepository) SetRecordedAt(ctx context.Context, jobID string, recordedAt time.Time, source string) error {
+	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).
+		Updates(map[string]interface{}{"recorded_at": recordedAt.UTC(), "recorded_at_source": source}).Error
 }
 
 func (r *jobRepository) FindByStatus(ctx context.Context, status models.JobStatus) ([]models.TranscriptionJob, error) {
@@ -345,6 +353,11 @@ type SummaryRepository interface {
 	SaveSummary(ctx context.Context, summary *models.Summary) error
 	GetLatestSummary(ctx context.Context, transcriptionID string) (*models.Summary, error)
 	DeleteByTranscriptionID(ctx context.Context, transcriptionID string) error
+	ListSummaries(ctx context.Context, transcriptionID string) ([]models.Summary, error)
+	SetDefaultTemplate(ctx context.Context, id string) error
+	SaveSuggestions(ctx context.Context, jobID string, s models.JobSuggestion, applyTitle bool) error
+	SetTags(ctx context.Context, jobID string, tags models.StringList) error
+	TagCounts(ctx context.Context) ([]TagCount, error)
 }
 
 type summaryRepository struct {
@@ -650,4 +663,97 @@ func (r *refreshTokenRepository) Revoke(ctx context.Context, id uint) error {
 
 func (r *refreshTokenRepository) RevokeByHash(ctx context.Context, hash string) error {
 	return r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("hashed = ?", hash).Update("revoked", true).Error
+}
+
+// ListSummaries returns every stored summary for a transcription, newest first.
+func (r *summaryRepository) ListSummaries(ctx context.Context, transcriptionID string) ([]models.Summary, error) {
+	var out []models.Summary
+	err := r.db.WithContext(ctx).
+		Select("id", "transcription_id", "template_id", "model", "content", "created_at", "updated_at").
+		Where("transcription_id = ?", transcriptionID).
+		Order("created_at DESC").
+		Find(&out).Error
+	return out, err
+}
+
+// SaveSuggestions stores the suggested title, brief and tags on a job.
+// The tags also become the job's tags unless the user has edited them.
+// With applyTitle the suggestion also replaces the job title. Only these
+// columns are written, so a concurrent update to other fields is kept.
+func (r *summaryRepository) SaveSuggestions(ctx context.Context, jobID string, s models.JobSuggestion, applyTitle bool) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updates := map[string]interface{}{
+			"suggested_title": s.Title,
+			"suggested_tags":  s.Tags,
+		}
+		if s.Brief != "" {
+			updates["summary_brief"] = s.Brief
+		}
+		if applyTitle {
+			updates["title"] = s.Title
+		}
+		if err := tx.Model(&models.TranscriptionJob{}).Where("id = ?", jobID).Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.TranscriptionJob{}).
+			Where("id = ? AND (tags_edited = ? OR tags_edited IS NULL)", jobID, false).
+			Update("tags", s.Tags).Error
+	})
+}
+
+// SetTags replaces a job's tags with ones the user chose. Later summaries
+// no longer overwrite them.
+func (r *summaryRepository) SetTags(ctx context.Context, jobID string, tags models.StringList) error {
+	res := r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).
+		Updates(map[string]interface{}{"tags": tags, "tags_edited": true})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// TagCount is a tag and how many recordings use it.
+type TagCount struct {
+	Tag   string `json:"tag"`
+	Count int    `json:"count"`
+}
+
+// TagCounts lists every tag in use, most used first.
+func (r *summaryRepository) TagCounts(ctx context.Context) ([]TagCount, error) {
+	var rows []models.StringList
+	if err := r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).
+		Where("tags IS NOT NULL").Pluck("tags", &rows).Error; err != nil {
+		return nil, err
+	}
+	counts := map[string]int{}
+	for _, tags := range rows {
+		for _, t := range tags {
+			counts[t]++
+		}
+	}
+	out := make([]TagCount, 0, len(counts))
+	for t, n := range counts {
+		out = append(out, TagCount{Tag: t, Count: n})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Tag < out[j].Tag
+	})
+	return out, nil
+}
+
+// SetDefaultTemplate marks one template as the default and clears the flag
+// on every other template.
+func (r *summaryRepository) SetDefaultTemplate(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.SummaryTemplate{}).Where("id <> ?", id).Update("is_default", false).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.SummaryTemplate{}).Where("id = ?", id).Update("is_default", true).Error
+	})
 }

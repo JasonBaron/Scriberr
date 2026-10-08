@@ -8,6 +8,37 @@ export interface SummaryTemplate {
     model: string;
     prompt: string;
     include_speaker_info?: boolean;
+    reasoning?: boolean;
+    is_default?: boolean;
+}
+
+const LAST_TEMPLATE_KEY = "scriberr.summary.lastTemplateId";
+
+export function getLastTemplateId(): string | null {
+    try {
+        return window.localStorage.getItem(LAST_TEMPLATE_KEY);
+    } catch {
+        return null;
+    }
+}
+
+export function setLastTemplateId(id: string) {
+    try {
+        window.localStorage.setItem(LAST_TEMPLATE_KEY, id);
+    } catch {
+        /* storage unavailable; preselect falls back to the default template */
+    }
+}
+
+// pickInitialTemplate returns the template to preselect: the default
+// template, else the last one used, else the only one.
+export function pickInitialTemplate(templates: SummaryTemplate[]): string {
+    const def = templates.find(t => t.is_default);
+    if (def) return def.id;
+    const last = getLastTemplateId();
+    if (last && templates.some(t => t.id === last)) return last;
+    if (templates.length === 1) return templates[0].id;
+    return "";
 }
 
 export function useSummaryTemplates() {
@@ -40,6 +71,30 @@ export function useExistingSummary(audioId: string) {
     });
 }
 
+export interface StoredSummary {
+    id: string;
+    template_id?: string;
+    template_name?: string;
+    model: string;
+    content: string;
+    created_at: string;
+}
+
+export function useSummaries(audioId: string, enabled = true) {
+    const { getAuthHeaders } = useAuth();
+    return useQuery({
+        queryKey: ["summaries", audioId],
+        queryFn: async () => {
+            const response = await fetch(`/api/v1/transcription/${audioId}/summaries`, {
+                headers: getAuthHeaders(),
+            });
+            if (!response.ok) return [] as StoredSummary[];
+            return response.json() as Promise<StoredSummary[]>;
+        },
+        enabled: enabled && !!audioId,
+    });
+}
+
 export function useSummarizer(audioId: string) {
     const { getAuthHeaders } = useAuth();
     const queryClient = useQueryClient();
@@ -69,9 +124,18 @@ export function useSummarizer(audioId: string) {
                 }),
             });
 
+            if (!res.ok) {
+                let message = `Summary request failed (${res.status})`;
+                try {
+                    const data = await res.json();
+                    if (data?.error) message = data.error;
+                } catch { /* not JSON */ }
+                throw new Error(message);
+            }
             if (!res.body) {
                 throw new Error('Failed to start summary stream.');
             }
+            setLastTemplateId(templateId);
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
@@ -87,8 +151,18 @@ export function useSummarizer(audioId: string) {
                 if (chunk) setStreamContent(prev => prev + chunk);
             }
 
-            // Invalidate summary query after successful generation
+            // Refresh the stored summary, the summary list and the job (the
+            // server may have applied a suggested title and tags).
             queryClient.invalidateQueries({ queryKey: ["summary", audioId] });
+            queryClient.invalidateQueries({ queryKey: ["summaries", audioId] });
+            // Title and tags are generated in the background after the stream
+            // closes; refetch the job a few times while they land.
+            for (const delay of [3000, 10000, 30000]) {
+                setTimeout(() => {
+                    queryClient.invalidateQueries({ queryKey: ["audio", audioId] });
+                    queryClient.invalidateQueries({ queryKey: ["audioFiles"] });
+                }, delay);
+            }
 
         } catch (e) {
             setError(e instanceof Error ? e.message : "Summary generation failed");

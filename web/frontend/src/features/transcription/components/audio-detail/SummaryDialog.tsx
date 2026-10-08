@@ -22,12 +22,9 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useState, useEffect } from "react";
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import rehypeRaw from 'rehype-raw';
-import rehypeKatex from 'rehype-katex';
-import rehypeHighlight from 'rehype-highlight';
-import { useSummaryTemplates, useSummarizer, useExistingSummary } from "@/features/transcription/hooks/useTranscriptionSummary";
+import { SummaryMarkdown } from "./SummaryMarkdown";
+import { downloadText, summaryFilename } from "./summaryFiles";
+import { useSummaryTemplates, useSummarizer, useExistingSummary, pickInitialTemplate } from "@/features/transcription/hooks/useTranscriptionSummary";
 
 import { useTranscript, useAudioDetail, type Transcript } from "@/features/transcription/hooks/useAudioDetail";
 import { useSpeakerMappings } from "@/features/transcription/hooks/useTranscriptionSpeakers";
@@ -56,9 +53,11 @@ interface SummaryDialogProps {
     isOpen: boolean;
     onClose: (open: boolean) => void;
     llmReady: boolean | null;
+    // Open on the template selector instead of the stored summary
+    startNew?: boolean;
 }
 
-export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDialogProps) {
+export function SummaryDialog({ audioId, isOpen, onClose, llmReady, startNew = false }: SummaryDialogProps) {
     const { toast } = useToast();
     const { data: templates = [], isLoading: templatesLoading } = useSummaryTemplates();
     const { data: existingSummary, isLoading: summaryLoading } = useExistingSummary(audioId);
@@ -79,10 +78,18 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
     // Auto-show existing summary if available and not streaming
     // Wait for loading to complete to prevent blank display
     useEffect(() => {
-        if (isOpen && !summaryLoading && existingSummary?.content && !isStreaming && !streamContent) {
+        if (isOpen && !startNew && !summaryLoading && existingSummary?.content && !isStreaming && !streamContent) {
             setShowOutput(true);
         }
-    }, [isOpen, existingSummary, summaryLoading, isStreaming, streamContent]);
+    }, [isOpen, startNew, existingSummary, summaryLoading, isStreaming, streamContent]);
+
+    // Preselect the default (or last used) template when the selector shows
+    useEffect(() => {
+        if (isOpen && !showOutput && !selectedTemplateId && templates.length > 0) {
+            const initial = pickInitialTemplate(templates);
+            if (initial) setSelectedTemplateId(initial);
+        }
+    }, [isOpen, showOutput, selectedTemplateId, templates]);
 
     // Reset state when dialog closes
     useEffect(() => {
@@ -116,18 +123,7 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
         const content = streamContent || existingSummary?.content || "";
         if (!content) return;
 
-        const title = audioFile?.title || "summary";
-        const filename = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}-summary.md`;
-
-        const blob = new Blob([content], { type: 'text/markdown' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        downloadText(content, summaryFilename(audioFile?.title, 'md'), 'text/markdown');
     };
 
     // Handle close - prevent closing during streaming
@@ -175,7 +171,6 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
                                 size="sm"
                                 onClick={() => {
                                     setShowOutput(false);
-                                    setSelectedTemplateId('');
                                 }}
                                 disabled={isStreaming}
                                 className="h-9 rounded-full border-[rgba(0,0,0,0.06)] dark:border-[rgba(255,255,255,0.08)] hover:bg-[var(--bg-main)] transition-all"
@@ -222,22 +217,7 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
                                 </div>
                             ) : (
                                 <div className="prose prose-stone dark:prose-invert max-w-none text-[#171717] dark:text-[#EDEDED] leading-relaxed">
-                                    <ReactMarkdown
-                                        remarkPlugins={[remarkMath]}
-                                        rehypePlugins={[rehypeRaw as any, rehypeKatex as any, rehypeHighlight as any]} // eslint-disable-line @typescript-eslint/no-explicit-any
-                                        components={{
-                                            p: ({ ...props }) => <p className="text-[#525252] dark:text-[#A3A3A3] leading-7 mb-4" {...props} />,
-                                            h1: ({ ...props }) => <h1 className="text-[#171717] dark:text-[#EDEDED] font-bold text-2xl mt-6 mb-4" {...props} />,
-                                            h2: ({ ...props }) => <h2 className="text-[#171717] dark:text-[#EDEDED] font-bold text-xl mt-6 mb-3" {...props} />,
-                                            h3: ({ ...props }) => <h3 className="text-[#171717] dark:text-[#EDEDED] font-bold text-lg mt-5 mb-2" {...props} />,
-                                            li: ({ ...props }) => <li className="pl-1 text-[#525252] dark:text-[#A3A3A3] mb-1" {...props} />,
-                                            strong: ({ ...props }) => <strong className="text-[#171717] dark:text-[#EDEDED] font-bold" {...props} />,
-                                            ul: ({ ...props }) => <ul className="list-disc pl-5 mb-4" {...props} />,
-                                            ol: ({ ...props }) => <ol className="list-decimal pl-5 mb-4" {...props} />,
-                                        }}
-                                    >
-                                        {streamContent || existingSummary?.content || ""}
-                                    </ReactMarkdown>
+                                    <SummaryMarkdown content={streamContent || existingSummary?.content || ""} />
                                     {isStreaming && (
                                         <span className="inline-block w-2 h-5 bg-[var(--brand-solid)] ml-0.5 animate-pulse align-middle" />
                                     )}

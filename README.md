@@ -69,14 +69,23 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | | Web UI and `/health` up within seconds of start; model checks run in the background and API writes return 503 until jobs can run. Docker `HEALTHCHECK` built in |
 | | Entrypoint no longer re-chowns tens of GB of model envs on every start |
 | | Time zone data embedded so `TZ` applies to log timestamps |
+| fork-features-1 | Transcription and the local LLM share the GPU: one lock, Ollama models unloaded before transcription and after each summary, and a wait for free VRAM when other services use the card |
+| | Working title (`{date} {topic}`) and up to 5 tags suggested after each summary; the title is applied automatically over placeholder names |
+| | Per-template Reasoning switch (thinking off by default) and a default template preselected in the Summarize dialog |
+| | Summary shown on the job page with copy, .md/.txt download and a switcher for multiple summaries |
+| | Tags shown in the recordings list (click to filter) and matched by search; editable on the job page with suggestions from tags already in use |
+| | Generated tags standardized: the model is given the existing tag list to reuse, and case, spacing and singular/plural variants are folded into existing tags |
+| | One-sentence brief per recording, shown in the list |
+| | Optional automatic summary after each transcription (Settings > Summary), using the default template; waits for the GPU with a local model |
+| | Recorded date read from file metadata (QuickTime/MP4 `creation_time`, WAV/BWF dates), else the file's modified time; used in the list, the job page and suggested titles |
 
 ### Next
 
 | Item | Notes |
 |---|---|
 | fork-fixes-5: YouTube | Transcripts do not appear after adding a video; Shorts links are not accepted |
-| Tags | Manual tags with filtering in the list |
-| AI tags and auto-summary | Suggested tags (accept or dismiss) and summaries on completion, through a local Ollama model |
+| fork-features-2: recordings as units | Per-recording folders, duplicate upload detection, zip export |
+| fork-features-3: speakers and tags | Speaker ranges per profile, speaker names in summaries, real tags (from the suggestions) with filtering, template chosen by tag or profile |
 | Progress and ETA | Per-model estimates from measured real-time factors |
 | Metrics | Processing time, model and RTF per job in the UI |
 | Transcript search | Search inside transcript text, not only titles |
@@ -154,9 +163,17 @@ Upstream settings (`HOST`, `PORT`, `DATABASE_PATH`, `ALLOWED_ORIGINS`, `SECURE_C
 | `UV_PYTHON_INSTALL_DIR` | `/app/whisperx-env/.uv-python` | Where uv installs Python (set in the image) |
 | `NLTK_DATA` | `/app/whisperx-env/.nltk_data` | WhisperX alignment tokenizer data (set in the image) |
 | `TZ` | UTC | Time zone for log timestamps. Stored data always stays in UTC |
+| `SCRIBERR_GPU_MIN_FREE_MB` | `6000` | Free VRAM a transcription waits for (other containers using the GPU) |
+| `SCRIBERR_GPU_WAIT_MAX` | `30m` | Longest wait for free VRAM before starting anyway; `0` disables the wait |
+| `SCRIBERR_UNLOAD_LLM_BEFORE_TRANSCRIPTION` | `true` | Unload every Ollama model before a transcription starts |
+| `SCRIBERR_UNLOAD_LLM_AFTER_SUMMARY` | `true` | Unload the summary model when the summary and title are done |
+| `SCRIBERR_SUGGEST_TITLES` | `true` | Suggest a title and tags after each summary |
+| `SCRIBERR_TITLE_FORMAT` | `{date} {topic}` | Pattern for suggested titles; `{date}` is the recorded date (upload date if unknown), YYYY-MM-DD in `TZ` |
 | `SCRIBERR_FIX_OWNERSHIP` | `false` | Force a full `chown` of `/app/data` and `/app/whisperx-env` on start (otherwise only when the top-level owner is wrong) |
 
 For summaries and chat with Ollama, use Scriberr's **Ollama** provider. The OpenAI-compatible provider cannot pass `num_ctx`, so long transcripts get truncated there.
+
+While a local (Ollama) summary or chat holds the GPU, a new transcription waits for it. While a transcription runs, summary and chat requests return 503 "GPU is busy" instead of competing for VRAM. Remote providers are not affected.
 
 ## Job logs
 

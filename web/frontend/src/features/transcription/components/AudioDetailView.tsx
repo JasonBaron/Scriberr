@@ -22,6 +22,8 @@ import { TranscriptSection } from "./audio-detail/TranscriptSection";
 import { ExecutionInfoDialog } from "./audio-detail/ExecutionInfoDialog";
 import { LogsDialog } from "./audio-detail/LogsDialog";
 import { SummaryDialog } from "./audio-detail/SummaryDialog";
+import { SummaryPanel } from "./audio-detail/SummaryPanel";
+import { TagEditor } from "./audio-detail/TagEditor";
 import { ChatSidePanel } from "./ChatSidePanel";
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -57,6 +59,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
     const [executionDialogOpen, setExecutionDialogOpen] = useState(false);
     const [logsDialogOpen, setLogsDialogOpen] = useState(false);
     const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
+    const [summaryStartNew, setSummaryStartNew] = useState(false);
 
     // Data Fetching
     const { data: audioFile, isLoading, error } = useAudioDetail(audioId || "");
@@ -171,7 +174,8 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
     }
 
     // Helper to format date "Premium" style
-    const formattedDate = new Date(audioFile.created_at).toLocaleDateString("en-US", {
+    // Recorded date when known (file metadata or modified time), else upload date
+    const formattedDate = new Date(audioFile.recorded_at || audioFile.created_at).toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric"
@@ -209,7 +213,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                             </div>
                             <div className="space-y-6 sm:space-y-8">
                                 {/* Sticky header: Title + Audio Player */}
-                                <div className="sticky top-0 z-10">
+                                <div className="sticky top-0 z-10 bg-[var(--bg-main)]">
                                     {/* Title & Metadata */}
                                     <div className="space-y-4 glass-card rounded-[var(--radius-card)] border-[var(--border-subtle)] shadow-[var(--shadow-card)] p-4 md:p-6 mb-4">
                                     <div className="flex items-start justify-between gap-4">
@@ -291,6 +295,9 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                                     )}
                                                 </div>
                                             </div>
+                                            {audioFile.status === "completed" && (
+                                                <TagEditor audioId={audioId} tags={audioFile.tags || []} />
+                                            )}
                                             {(audioFile.status === "processing" || audioFile.status === "pending") && typeof pipelineProgress === "number" && (
                                                 <div className="mt-2 max-w-xs">
                                                     <div className="h-1.5 rounded-full bg-gray-200 dark:bg-zinc-700 overflow-hidden">
@@ -367,7 +374,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                                             Rename Speakers
                                                         </DropdownMenuItem>
                                                     )}
-                                                    <DropdownMenuItem onClick={() => setSummaryDialogOpen(true)} className="rounded-[8px] cursor-pointer text-[var(--brand-solid)] focus:text-[var(--brand-solid)] focus:bg-[var(--brand-light)]">
+                                                    <DropdownMenuItem onClick={() => { setSummaryStartNew(false); setSummaryDialogOpen(true); }} className="rounded-[8px] cursor-pointer text-[var(--brand-solid)] focus:text-[var(--brand-solid)] focus:bg-[var(--brand-light)]">
                                                         <Bot className="mr-2 h-4 w-4" /> AI Summary
                                                     </DropdownMenuItem>
                                                     <DropdownMenuSeparator className="bg-[var(--border-subtle)] my-1" />
@@ -420,6 +427,13 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                         />
                                     </div>
                                 </div>
+
+                                {/* Summary (shown when one has been generated) */}
+                                <SummaryPanel
+                                    audioId={audioId}
+                                    audioFile={audioFile}
+                                    onRegenerate={() => { setSummaryStartNew(true); setSummaryDialogOpen(true); }}
+                                />
 
                                 {/* Transcript */}
                                 <TranscriptSectionWrapper
@@ -495,6 +509,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                 isOpen={summaryDialogOpen}
                 onClose={setSummaryDialogOpen}
                 llmReady={true}
+                startNew={summaryStartNew}
             />
 
             {/* Mobile / Overlay Chat */}

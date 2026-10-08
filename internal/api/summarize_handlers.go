@@ -48,6 +48,31 @@ func (h *Handler) Summarize(c *gin.Context) {
 		return
 	}
 
+	// Local LLMs share the GPU with transcription; refuse rather than wait.
+	releaseGPU, ok := tryLocalLLMGPU(svc)
+	if !ok {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gpuBusyMessage})
+		return
+	}
+	// The lock is handed to the follow-up work (title, unload) once the
+	// stream ends, so the response can close without waiting for it.
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			releaseGPU()
+		}
+	}()
+
+	// Reasoning models think only if the template asks for it
+	ctx := c.Request.Context()
+	reasoning := false
+	if req.TemplateID != nil && *req.TemplateID != "" {
+		if tpl, err := h.summaryRepo.FindByID(ctx, *req.TemplateID); err == nil && tpl != nil {
+			reasoning = tpl.Reasoning
+		}
+	}
+	ctx = llm.WithThinking(ctx, reasoning)
+
 	// Prepare chat messages: simple single-user message with full content
 	messages := []llm.ChatMessage{{Role: "user", Content: req.Content}}
 
@@ -62,12 +87,19 @@ func (h *Handler) Summarize(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no") // Disable nginx buffering
 	c.Status(http.StatusOK)             // Start response immediately
 
-	h.processSummarization(c, req, svc, messages, start)
+	summary, completed := h.processSummarization(c, ctx, req, svc, messages, start)
+
+	handedOff = true
+	go func() {
+		defer releaseGPU()
+		h.afterSummary(context.Background(), req, svc, summary, completed)
+		unloadAfterSummary(svc, req.Model)
+	}()
 }
 
-func (h *Handler) processSummarization(c *gin.Context, req SummarizeRequest, svc llm.Service, messages []llm.ChatMessage, start time.Time) {
+func (h *Handler) processSummarization(c *gin.Context, reqCtx context.Context, req SummarizeRequest, svc llm.Service, messages []llm.ChatMessage, start time.Time) (string, bool) {
 	// Allow longer generation time for large transcripts and smaller models
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Minute)
+	ctx, cancel := context.WithTimeout(reqCtx, 60*time.Minute)
 	defer cancel()
 
 	contentChan, errChan := svc.ChatCompletionStream(ctx, req.Model, messages, 0.0)
@@ -89,7 +121,7 @@ func (h *Handler) processSummarization(c *gin.Context, req SummarizeRequest, svc
 				// Persist summary once streaming completes
 				h.persistSummary(req, finalText)
 				log.Printf("[summarize] complete transcription_id=%s model=%s bytes=%d duration_ms=%d", req.TranscriptionID, req.Model, len(finalText), time.Since(start).Milliseconds())
-				return
+				return finalText, true
 			}
 			finalText += chunk
 			_, _ = writer.WriteString(chunk)
@@ -101,18 +133,23 @@ func (h *Handler) processSummarization(c *gin.Context, req SummarizeRequest, svc
 				gotFirstChunk = true
 				log.Printf("[summarize] first_chunk transcription_id=%s model=%s at_ms=%d", req.TranscriptionID, req.Model, time.Since(start).Milliseconds())
 			}
-		case err := <-errChan:
-			if err != nil {
-				h.handleSummarizeError(c, req, svc, messages, err, finalText, start)
+		case err, ok := <-errChan:
+			if !ok || err == nil {
+				// The providers close errChan before contentChan, and
+				// contentChan is buffered. Stop watching errChan and keep
+				// draining content; a closed contentChan ends the stream.
+				errChan = nil
+				continue
 			}
+			h.handleSummarizeError(c, req, svc, messages, err, finalText, start)
 			// Persist any partial content on error
 			h.persistSummary(req, finalText)
-			return
+			return finalText, false
 		case <-ctx.Done():
 			// Persist any partial content on timeout/cancel
 			h.persistSummary(req, finalText)
 			log.Printf("[summarize] timeout/cancel transcription_id=%s model=%s bytes=%d duration_ms=%d", req.TranscriptionID, req.Model, len(finalText), time.Since(start).Milliseconds())
-			return
+			return finalText, false
 		}
 	}
 }
@@ -234,4 +271,51 @@ func (h *Handler) GetSummaryForTranscription(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, s)
+}
+
+// SummaryListItem is one stored summary with its template name.
+type SummaryListItem struct {
+	ID           string    `json:"id"`
+	TemplateID   *string   `json:"template_id,omitempty"`
+	TemplateName string    `json:"template_name,omitempty"`
+	Model        string    `json:"model"`
+	Content      string    `json:"content"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// ListSummariesForTranscription returns every stored summary for a
+// transcription, newest first
+// @Summary List summaries for transcription
+// @Description Get all saved summaries for the given transcription, newest first
+// @Tags summarize
+// @Produce json
+// @Param id path string true "Transcription ID"
+// @Success 200 {array} SummaryListItem
+// @Failure 500 {object} map[string]string
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /api/v1/transcription/{id}/summaries [get]
+func (h *Handler) ListSummariesForTranscription(c *gin.Context) {
+	ctx := c.Request.Context()
+	tid := c.Param("id")
+	list, err := h.summaryRepo.ListSummaries(ctx, tid)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch summaries"})
+		return
+	}
+	names := map[string]string{}
+	if tpls, _, err := h.summaryRepo.List(ctx, 0, 1000); err == nil {
+		for _, t := range tpls {
+			names[t.ID] = t.Name
+		}
+	}
+	out := make([]SummaryListItem, 0, len(list))
+	for _, s := range list {
+		item := SummaryListItem{ID: s.ID, TemplateID: s.TemplateID, Model: s.Model, Content: s.Content, CreatedAt: s.CreatedAt}
+		if s.TemplateID != nil {
+			item.TemplateName = names[*s.TemplateID]
+		}
+		out = append(out, item)
+	}
+	c.JSON(http.StatusOK, out)
 }
