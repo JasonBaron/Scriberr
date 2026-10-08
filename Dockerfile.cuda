@@ -132,5 +132,10 @@ VOLUME ["/app/data"]
 RUN uv --version
 
 # Use entrypoint script that handles user switching and permissions
+# /health is 503 "starting" while model environments are checked, 200 once jobs
+# can run. A first install downloads several GB, hence the long start period.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15m --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${PORT:-8080}/health" >/dev/null || exit 1
+
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["/app/scriberr"]

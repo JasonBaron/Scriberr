@@ -22,7 +22,7 @@ RUN cd frontend \
 ########################
 # Go build stage
 ########################
-FROM golang:1.24-bookworm AS go-builder
+FROM golang:1.26-bookworm AS go-builder
 WORKDIR /src
 
 # Pre-cache modules
@@ -76,6 +76,7 @@ WORKDIR /app
 # System deps: curl for uv install, ca-certs, ffmpeg for yt-dlp, git for git+ installs, gosu for user switching
 # Ubuntu 24.04 comes with Python 3.12 which works fine with WhisperX
 RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        curl ca-certificates ffmpeg git gosu unzip \
        build-essential gcc g++ make python3-dev \
@@ -132,5 +133,10 @@ VOLUME ["/app/data"]
 RUN uv --version
 
 # Use entrypoint script that handles user switching and permissions
+# /health is 503 "starting" while model environments are checked, 200 once jobs
+# can run. A first install downloads several GB, hence the long start period.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15m --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${PORT:-8080}/health" >/dev/null || exit 1
+
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["/app/scriberr"]

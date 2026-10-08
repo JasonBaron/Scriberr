@@ -3,302 +3,115 @@
   <img src="logo-text.svg" height="80" style="vertical-align: middle;" />
 </div>
 </br>
-</br>
+
 <p align="center">
-Scriberr is an open-source, and completely offline audio transcription application designed for self-hosters who value privacy and performance.
+Self-hosted, offline audio transcription with speaker diarization, running on your own GPU.
 </p>
 
 <p align="center">
-  <a href="https://scriberr.app">Website</a> •
-  <a href="https://scriberr.app/docs/">Docs</a> •
-  <a href="https://scriberr.app/api">API Reference</a>
-</p>
-
-<p align="center">
-<a href='https://ko-fi.com/H2H41KQZA3' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
+<b>This is a maintained fork of <a href="https://github.com/rishikanthc/Scriberr">rishikanthc/Scriberr</a>.</b><br/>
+Upstream docs: <a href="https://github.com/rishikanthc/Scriberr#readme">original README</a> •
+<a href="https://scriberr.app/docs/">scriberr.app/docs</a> •
+<a href="https://scriberr.app/api">API reference</a>
 </p>
 
 <div align="center">
-  <img src="screenshots/hero.png" alt="Scriberr Desktop App" width="800" />
+  <img src="screenshots/hero.png" alt="Scriberr" width="800" />
 </div>
 
+## About this fork
 
-## Why this fork?
-Hi everyone, this is a simple fork of Scriberr put together to make some simple dockerfile fixes to resolve UID permission conflicts in the CUDA 12.9 version of the image. At present, the current build with CUDA 12.9 on blackwell gpus errors out due to these permission conflicts, I can confirm that my version here is tested and working on an RTX 5090 system. I have no intentions of maintaining this package, this was a one off contribution. I have accordingly committed these changes to the original developer so that they can update the original repository and all can benefit :)
+Scriberr is a solid self-hosted transcription app whose upstream development has been mostly idle. This fork keeps it running reliably on a home GPU server and adds the features its users have been asking for.
 
-## Update on project status
+Goals, in order:
 
-Apologies for the radio silence.. I did find a new job, but had to move across the country for it. So between multiple moves, settling down into the new job and just recuperating from all the stress and anxiety I went through during the process made me want to take some time off.. So I was taking it easy, spending time with my family and didn't really have a lot of free time nor the mindset to work on my personal projects..
-That said, things are good now and boredom has been creeping up and I have been itching to get back into my personal projects.. I still need to setup my self-hosting server which I have been procrastinating for a while now xD
+1. **Reliable.** Jobs should not break because an upstream tool released a new version, a container was recreated, or the network was down for a minute.
+2. **Private.** Transcript text and secrets stay out of logs and process lists. Recordings never leave the box unless you configure a cloud model.
+3. **Debuggable.** Every job writes a readable log: what ran, with which settings, how long each stage took, and why it failed.
+4. **Useful.** Tags, AI-assisted tags and summaries, search, and progress estimates.
 
-TLDR the project isn't abandoned. I'll be starting development again this week :)
-Look like a lot of advancements and developments have happened in this domain in the past few months and I could actually use your input and thoughts on something.
-Please check https://github.com/rishikanthc/Scriberr/discussions/485 and please do drop your thoughts and comments. I would like to get the communities input on this one to decide next steps.
-Also, thanks for all the love and support ! Y'all are awesome.
+Every change is validated on a separate test stack (its own container, data and model environments) before it is merged to `main`. Changes land in numbered `fork-fixes-N` branches with one commit per fix.
 
-~~Hi everyone,~~
-~~It’s been a while since the last update, so I wanted to share what’s been going on with Scriberr.~~
+Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda` (CUDA 12.6), Ubuntu host with Portainer.
 
-~~Recently, I was affected by layoffs at eBay (around 800 roles were impacted), and I unfortunately was one of them. The past few weeks have been a bit overwhelming as I’ve been focused on figuring out next steps and actively searching for new opportunities.~~
+## Status
 
-~~Because of that, I haven’t been able to spend time on Scriberr lately. As much as I’d love to keep pushing it forward, I need to prioritize getting back on my feet first. Development is paused for now, but **definitely not abandoned. I still have a lot of ideas and plans I’m excited to come back to.**~~
+### Upstream pull requests merged
 
-~~That said, if anyone in the community is interested in contributing or helping move the project forward during this time, I’d be very open to collaborating. I’d love to see Scriberr continue to evolve even while I’m temporarily away from active development.~~
+| PR | Change |
+|---|---|
+| #482 | Validate `sortBy` / `sortOrder` before building SQL `ORDER BY` (injection fix) |
+| #481 | Set the access-token cookie on registration so audio plays without logging in again |
+| #463 | Fix the UID 1000 conflict with the `ubuntu` user in CUDA images on Ubuntu 24.04 |
+| #474 | `SCRIBERR_ENABLED_MODELS` to skip installing models you do not use |
+| #471 | Allow `large-v3-turbo` as a WhisperX model |
+| #404 | Pipeline status endpoint, shown in the UI |
+| #358 | Click a timestamp in Timeline view to seek |
+| #480 | Copy transcript to clipboard |
 
-~~I really appreciate all the support, interest, and encouragement this project has received so far. It genuinely means a lot, and I’m looking forward to continuing work on Scriberr once things stabilize on my end.~~
-~~Thanks again for your patience and support, I truly appreciate it.~~
+### Fork fixes
 
-~~In the meantime, if you happen to know of any opportunities in AI/ML engineering or research, I’d be incredibly grateful for any referrals or connections. You can find more about my work and experience here: https://rishikanthc.com~~
+| Branch | Change |
+|---|---|
+| fork-fixes-1 | Transcript text kept out of job logs (`SCRIBERR_LOG_TRANSCRIPTS=true` to keep it) |
+| | Hugging Face token passed by environment, not on the command line where `ps` shows it |
+| | `.m4a` and other audio extensions always treated as audio, including mobile uploads |
+| | torchcodec pinned to 0.7 in the PyAnnote env (0.8+ needs CUDA 13 and breaks diarization); pins are re-applied to existing envs on startup |
+| fork-fixes-2 | All fixable HIGH/CRITICAL CVEs patched: Go 1.26, current `golang.org/x` modules, `apt-get upgrade` in the image (134 to 0 in Trivy) |
+| fork-fixes-3 | Structured job logs: header, pre-flight checks, numbered stages with timings, SUCCESS/FAILED footer with the real error and a hint |
+| | uv pinned (0.12.23) and switched to `--system-certs` before the old `--native-tls` flag is removed |
+| fork-fixes-4 | WhisperX pinned to a validated commit; an existing checkout is reused instead of failing on `git clone` |
+| | Environment installs serialized per env (Parakeet and Canary share one and used to corrupt it) |
+| | uv's Python and WhisperX's NLTK data stored on the env volume, so recreating the container does not break envs or re-download data |
+| | Ollama `num_ctx` sized to the prompt, so long transcripts are no longer silently cut to their last few minutes |
+| | Models not in `SCRIBERR_ENABLED_MODELS` hidden in the transcription dialog |
+| | WhisperX's bundled VAD checkpoint upgraded once, removing a per-job Lightning warning |
+| | Web UI and `/health` up within seconds of start; model checks run in the background and API writes return 503 until jobs can run. Docker `HEALTHCHECK` built in |
+| | Entrypoint no longer re-chowns tens of GB of model envs on every start |
+| | Time zone data embedded so `TZ` applies to log timestamps |
 
-## Sponsors
+### Next
 
-![recall.ai-logo](https://cdn.prod.website-files.com/620d732b1f1f7b244ac89f0e/66b294e51ee15f18dd2b171e_recall-logo.svg) Meeting Transcription API   
-If you're looking for a transcription API for meetings, consider checking out [Recall.ai](https://www.recall.ai/?utm_source=github&utm_medium=sponsorship&utm_campaign=rishikanthc-scriberr), an API that works with Zoom, Google Meet, Microsoft Teams, and more.
-Recall.ai diarizes by pulling the speaker data and seperate audio streams from the meeting platforms, which means 100% accurate speaker diarization with actual speaker names.
+| Item | Notes |
+|---|---|
+| fork-fixes-5: YouTube | Transcripts do not appear after adding a video; Shorts links are not accepted |
+| Tags | Manual tags with filtering in the list |
+| AI tags and auto-summary | Suggested tags (accept or dismiss) and summaries on completion, through a local Ollama model |
+| Progress and ETA | Per-model estimates from measured real-time factors |
+| Metrics | Processing time, model and RTF per job in the UI |
+| Transcript search | Search inside transcript text, not only titles |
 
-## Introduction
+## Build
 
-At its core, Scriberr allows you to transcribe audio and video locally on your machine, ensuring no data is ever sent to a third-party cloud provider.
-Leveraging state-of-the-art machine learning models (such as **NVIDIA Parakeet**, and **Canary**) or the older more popular **Whisper** models, it delivers high-accuracy text with word-level timing.
-
-Scriberr goes beyond simple transcription and provides various advanced capabilities.
-It combines powerful under-the-hood AI with a polished, fluid user interface that makes managing your recordings feel effortless. Whether you are sorting through voice notes or analyzing long meetings, Scriberr provides a beautiful environment to get work done:
-
-- **Smart Speaker Detection**: Scriberr automatically detects different speakers (Diarization) and labels exactly who said what.
-- **Chat with your Audio**: Connect seamlessly with Ollama or OpenAI API compatible providers. You can generate summaries, ask questions, or have a full conversation with your transcripts right inside the app.
-- **Built for your Workflow**: With extensive APIs and Folder Watcher that automatically processes new files in a folder, Scriberr fits right into your existing automations (like n8n).
-- **Capture & Organize**: Use the built-in audio recorder to capture thoughts on the fly, and the integrated note-taking features to annotate your transcripts as you listen.
-- **Native Experience everywhere**: Scriberr supports PWA (Progressive Web App) installation, giving you a native app experience on your desktop or mobile device.
-- **A Polished UI**: I’ve focused on the little UI niceties that make the app feel responsive and satisfying to use.
-
-[View full list of features →](https://scriberr.app/docs/features)
-
-### Why I built this
-
-The inspiration for Scriberr was born out of privacy paranoia and not wanting to pay for subscription.
-About a year ago, I purchased a [Plaud Note](https://www.plaud.ai/) for recording voice memos. I loved the device itself; the form factor, microphone quality, and workflow were excellent.
-
-However, transcription was done on their cloud servers. As someone who is paranoid about privacy I wasn't comfortable with uploading my recordings to a third party provider.
-Moreover I was hit with subscription costs: $100 a year for 20 hours of transcription per month, or $240 a year for unlimited access. As an avid self-hoster with a background in ML and AI, it felt wrong to pay such a premium for a service I knew I could engineer myself.
-
-I decided to build Scriberr to bridge that gap, creating a powerful, private, and free alternative for everyone.
-
-## Screenshots
-
-<details>
-  <summary>Click to expand</summary>
-
-  <p align="center">
-    <img alt="Transcript view" src="screenshots/transcript-light.png" width="720" />
-  </p>
-  <p align="center"><em>Transcript reader with playback follow‑along and seek‑from‑text.</em></p>
-
-  <p align="center">
-    <img alt="Chat with Audio" src="screenshots/chat.png" width="720" />
-  </p>
-  <p align="center"><em>Chat with your transcripts using local LLMs or OpenAI.</em></p>
-
-  <p align="center">
-    <img alt="Notes and Highlights" src="screenshots/notes.png" width="720" />
-  </p>
-  <p align="center"><em>Highlight key moments and take notes while listening.</em></p>
-
-  <p align="center">
-    <img alt="AI Summaries" src="screenshots/ai-summary.png" width="720" />
-  </p>
-  <p align="center"><em>Generate comprehensive summaries of your recordings.</em></p>
-
-  <p align="center">
-    <strong style="font-size: 1.2em;">Dark Mode</strong>
-  </p>
-
-  <p align="center">
-    <img alt="Homepage Dark Mode" src="screenshots/homepage-dark.png" width="720" />
-  </p>
-  <p align="center"><em>Homepage in Dark Mode.</em></p>
-
-  <p align="center">
-    <img alt="Transcript Dark Mode" src="screenshots/transcript-dark.png" width="720" />
-  </p>
-  <p align="center"><em>Transcript view in Dark Mode.</em></p>
-
-  ### Mobile
-
-  <p align="center">
-    <img alt="Mobile Homepage" src="screenshots/homepage-mobile.PNG" width="300" />
-    <img alt="Mobile Homepage Dark" src="screenshots/homepage-mobile-dark.PNG" width="300" />
-  </p>
-  <p align="center"><em>PWA mobile app (Light & Dark).</em></p>
-
-  <p align="center">
-    <img alt="Mobile Transcript" src="screenshots/transcript-mobile.PNG" width="300" />
-    <img alt="Mobile Transcript Dark" src="screenshots/transcript-mobile-dark.PNG" width="300" />
-  </p>
-  <p align="center"><em>Mobile transcript reading experience.</em></p>
-
-</details>
-
-## Installation
-
-Get Scriberr running on your system in a few minutes.
-
-### Migrating from v1.1.0
-
-If you are upgrading from v1.1.0, please follow these steps to ensure a smooth transition. Version 1.2.0 introduces a separation between application data (database, uploads) and model data (Python environments).
-
-#### 1. Update Volume Mounts
-
-You will need to update your Docker volume configuration to split your data:
-
-*   **Application Data:** Bind your existing data folder (containing `scriberr.db`, `jwt_secret`, `transcripts/`, and `uploads/`) to `/app/data`.
-*   **Model Environment:** Create a **new, empty folder** and bind it to `/app/whisperx-env`.
-
-#### 2. Clean Up Old Environments
-
-> **CRITICAL:** You must delete any existing `whisperx-env` folder from your previous installation.
-
-The Python environment and models need to be reinitialized for v1.2.0. If the application detects an old environment, it may attempt to use it, leading to compatibility errors. Starting with a fresh `/app/whisperx-env` volume ensures the correct dependencies are installed.
-
-### Install with Homebrew (macOS & Linux)
-
-The easiest way to install Scriberr is using Homebrew. If you don’t have Homebrew installed, [get it here first](https://brew.sh/).
+The image is built locally from this repo. There is no published image for the fork.
 
 ```bash
-# Add the Scriberr tap
-brew tap rishikanthc/scriberr
-
-# Install Scriberr (automatically installs UV dependency)
-brew install scriberr
-
-# Start the server
-scriberr
+git clone https://github.com/JasonBaron/Scriberr.git && cd Scriberr
+docker build -f Dockerfile.cuda \
+  --build-arg GIT_SHA=$(git rev-parse --short HEAD) \
+  -t scriberr-cuda:main .
 ```
 
-Open [http://localhost:8080](http://localhost:8080) in your browser.
+| Build arg | Default | Purpose |
+|---|---|---|
+| `GIT_SHA` | `dev` | Commit shown in every job log header |
+| `UV_VERSION` | `0.12.23` | uv version installed in the image; bump deliberately |
 
-### Configuration
+`Dockerfile.cuda` targets CUDA 12.6 (GTX 10 series through RTX 40 series). `Dockerfile.cuda.12.9` is for RTX 50 series and gets the same changes, but is not tested here.
 
-Scriberr works out of the box. However, for Homebrew or manual installations, you can customize the application behavior using environment variables or a `.env` file placed in the same directory as the binary (or where you run the command from).
+## Run (NVIDIA GPU)
 
-> **Docker Users:** You can ignore this section if you are using `docker-compose.yml`, as these values are already configured with sane defaults.
-
-#### Environment Variables
-
-| Variable | Description | Default |
-| :--- | :--- | :--- |
-| `PORT` | The port the server listens on. | `8080` |
-| `HOST` | The interface to bind to. | `0.0.0.0` |
-| `APP_ENV` | Application environment (`development` or `production`). | `development` |
-| `ALLOWED_ORIGINS` | CORS allowed origins (comma separated). | `http://localhost:5173,http://localhost:8080` |
-| `DATABASE_PATH` | Path to the SQLite database file. | `data/scriberr.db` |
-| `UPLOAD_DIR` | Directory for storing uploaded files. | `data/uploads` |
-| `TRANSCRIPTS_DIR` | Directory for storing transcripts. | `data/transcripts` |
-| `WHISPERX_ENV` | Path to the managed Python environment for models. | `data/whisperx-env` |
-| `OPENAI_API_KEY` | API Key for OpenAI (optional). | `""` |
-| `JWT_SECRET` | Secret for signing JWTs. Auto-generated if not set. | Auto-generated |
-| `SCRIBERR_ENABLED_MODELS` | Comma separated model IDs to prepare on startup. Empty means all models. | `""` (all) |
-
-#### Limiting model downloads (`SCRIBERR_ENABLED_MODELS`)
-
-By default Scriberr prepares every bundled model on first boot: it installs the Python
-environments and downloads the weights for WhisperX, Parakeet, Canary, Voxtral, PyAnnote and
-Sortformer. If you only use one of them — for example an OpenAI-compatible endpoint for
-transcription — that is several GB of downloads you will never use.
-
-Set `SCRIBERR_ENABLED_MODELS` to a comma separated list of model IDs to prepare only those:
-
-```bash
-# Cloud transcription only, no local model environments
-SCRIBERR_ENABLED_MODELS=openai_whisper
-
-# Local WhisperX with PyAnnote diarization
-SCRIBERR_ENABLED_MODELS=whisperx,pyannote
-```
-
-Valid model IDs: `whisperx`, `parakeet`, `canary`, `voxtral`, `openai_whisper` (transcription)
-and `pyannote`, `sortformer` (diarization).
-
-When the variable is unset or empty, every model is prepared on startup, exactly as before.
-Models left out of the list stay selectable in the UI and API: their environment is prepared
-the first time a job actually uses them, so that first job takes as long as the install and
-download would have taken at boot.
-
-**Example `.env` file:**
-
-```bash
-# Server settings
-HOST=localhost
-PORT=8080
-APP_ENV=production
-
-# Paths
-DATABASE_PATH=/var/lib/scriberr/data/scriberr.db
-UPLOAD_DIR=/var/lib/scriberr/data/uploads
-
-# Security
-JWT_SECRET=your-super-secret-key-change-this
-```
-
-### Docker Deployment
-
-For a containerized setup, you can use Docker. We provide two configurations: one for standard CPU usage and one optimized for NVIDIA GPUs (CUDA).
-
-> [!IMPORTANT]
-> **Permissions:** Ensure you set the `PUID` and `PGID` environment variables to your host user's UID and GID (typically `1000` on Linux) to avoid permission issues with the SQLite database. You can find your UID/GID by running `id` on your host.
->
-> **HTTP vs HTTPS:** By default, Scriberr enables **Secure Cookies** in production. If you are accessing the app via plain HTTP (not HTTPS), you MUST set `SECURE_COOKIES=false` in your environment variables, otherwise you will encounter "Unable to load audio stream" errors.
-
-#### Standard Deployment (CPU)
-
-Use this configuration for running Scriberr on any machine without a dedicated NVIDIA GPU.
-
-1.  Create a file named `docker-compose.yml`:
+Requires the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
 
 ```yaml
 services:
   scriberr:
-    image: ghcr.io/rishikanthc/scriberr:v1.2.0
+    image: scriberr-cuda:main
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"        # put a reverse proxy with TLS in front
     volumes:
-      - scriberr_data:/app/data # volume for data
-      - env_data:/app/whisperx-env # volume for models and python envs
-    environment:
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
-      - APP_ENV=production # DO NOT CHANGE THIS
-      # CORS: comma-separated list of allowed origins for production
-      # - ALLOWED_ORIGINS=https://your-domain.com
-      # - SECURE_COOKIES=false # Uncomment this ONLY if you are not using SSL
-    restart: unless-stopped
-
-volumes:
-  scriberr_data: {}
-  env_data: {}
-```
-
-2.  Run the container:
-
-```bash
-docker compose up -d
-```
-
-#### NVIDIA GPU Deployment (CUDA)
-
-If you have a compatible NVIDIA GPU, this configuration enables hardware acceleration for significantly faster transcription.
-
-1.  Ensure you have the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed.
-2.  Create a file named `docker-compose.cuda.yml`:
-
-```yaml
-services:
-  scriberr:
-    image: ghcr.io/rishikanthc/scriberr-cuda:v1.2.0
-    ports:
-      - "8080:8080"
-    volumes:
-      - scriberr_data:/app/data # volume for data
-      - env_data:/app/whisperx-env # volume for models and python envs
+      - ./data:/app/data             # database, uploads, transcripts, job logs
+      - ./whisperx-env:/app/whisperx-env   # model envs, uv Python, NLTK data (large)
     restart: unless-stopped
     deploy:
       resources:
@@ -306,111 +119,107 @@ services:
           devices:
             - driver: nvidia
               count: all
-              capabilities:
-                - gpu
+              capabilities: [gpu]
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
-      - APP_ENV=production # DO NOT CHANGE THIS
-      # CORS: comma-separated list of allowed origins for production
-      # - ALLOWED_ORIGINS=https://your-domain.com
-      # - SECURE_COOKIES=false # Uncomment this ONLY if you are not using SSL
-
-volumes:
-  scriberr_data: {}
-  env_data: {}
+      - APP_ENV=production
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+      - HF_TOKEN=${HF_TOKEN}          # needed for PyAnnote diarization
+      - SCRIBERR_ENABLED_MODELS=whisperx,pyannote
+      - QUEUE_WORKERS=1               # one GPU job at a time
+      - ALLOWED_ORIGINS=https://scriberr.example.com
 ```
 
-3.  Run the container with the CUDA configuration:
+Keep both volumes on local disk. uv's cache and venvs fail with permission errors on some union filesystems (mergerfs in particular).
 
-```bash
-docker compose -f docker-compose.cuda.yml up -d
+The first start installs the model environments, which takes a while and downloads several GB. Later starts reuse them, but still check each one (about 30 to 90 s on a typical setup).
+
+The web server starts immediately. While the environments are checked, `/health` returns `503 {"status":"starting","startup":"40s so far"}`, sign-in and browsing work, and uploads or new jobs return 503 with a retry hint. Once jobs can run, `/health` returns `200 {"status":"healthy","startup":"88s"}`. The image has a Docker `HEALTHCHECK` on `/health` (15 minute start period for first installs), so a compose `healthcheck:` block is not needed.
+
+## Configuration
+
+Upstream settings (`HOST`, `PORT`, `DATABASE_PATH`, `ALLOWED_ORIGINS`, `SECURE_COOKIES`, `JWT_SECRET`, `OPENAI_API_KEY` and others) work as documented in the [original README](https://github.com/rishikanthc/Scriberr#readme). Settings added or worth calling out in this fork:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SCRIBERR_ENABLED_MODELS` | all | Models to install at startup; others are hidden in the UI. IDs: `whisperx`, `pyannote`, `parakeet`, `canary`, `sortformer`, `voxtral`, `openai_whisper` |
+| `QUEUE_WORKERS` | 2 to 6 | Jobs run in parallel. Use `1` on a single consumer GPU |
+| `HF_TOKEN` | | Hugging Face token for PyAnnote models (accept their terms on huggingface.co) |
+| `SCRIBERR_LOG_TRANSCRIPTS` | `false` | Keep transcript text in job logs |
+| `SCRIBERR_LOG_VERBOSE` | `false` | Raw model output in job logs (no warning filtering or indentation) |
+| `SCRIBERR_WHISPERX_REF` | pinned commit | WhisperX commit, tag or branch for new installs |
+| `OLLAMA_NUM_CTX` | auto | Fixed Ollama context window for every request |
+| `OLLAMA_NUM_CTX_MAX` | `32768` | Cap on the automatic context size (KV cache uses GPU memory) |
+| `UV_PYTHON_INSTALL_DIR` | `/app/whisperx-env/.uv-python` | Where uv installs Python (set in the image) |
+| `NLTK_DATA` | `/app/whisperx-env/.nltk_data` | WhisperX alignment tokenizer data (set in the image) |
+| `TZ` | UTC | Time zone for job log timestamps |
+| `SCRIBERR_FIX_OWNERSHIP` | `false` | Force a full `chown` of `/app/data` and `/app/whisperx-env` on start (otherwise only when the top-level owner is wrong) |
+
+For summaries and chat with Ollama, use Scriberr's **Ollama** provider. The OpenAI-compatible provider cannot pass `num_ctx`, so long transcripts get truncated there.
+
+## Job logs
+
+**View Logs** on any job shows a log like this:
+
+```
+======================================
+SCRIBERR JOB START
+======================================
+Job ID      : 43188d01-c870-440a-bd71-af26ab6530c1
+Title       : Team sync
+Audio       : 43188d01-....wav (9.2 MB)
+Started     : 2026-10-07 10:43:56 EDT
+Version     : 5da8cd7
+======================================
+PRE-FLIGHT
+--------------------------------------
+GPU         : NVIDIA GeForce RTX 3060, 11.4 GB free of 12.0 GB
+uv          : uv 0.12.23 (x86_64-unknown-linux-gnu)
+HF token    : present (job parameters)
+Profile     : whisper large-v3 | cuda float16 | batch 4 | en | VAD pyannote 0.50/0.363 | diarize pyannote (2-2 speakers)
+[1/3] Preparing audio...
+      done  0.2s  (300.0 s, wav, no conversion needed)
+[2/3] Transcribing + diarizing (whisperx large-v3)...
+      - voice activity detection using Pyannote (+39.3s)
+      - transcription (+40.5s)
+      - alignment (+51.5s)
+      - diarization (+53.7s)
+      [scriberr] 10 transcript line(s) omitted from this log
+      [scriberr] 3 known warning(s) suppressed (TF32, hf_token flag, pyannote std())
+      done  66.5s  (62 segments, 432 words, 2 speakers)
+[3/3] Saving transcript...
+      done  0.0s  (saved to database)
+======================================
+SCRIBERR JOB COMPLETE
+======================================
+Duration    : 66.7 s (RTF 0.222)
+Status      : SUCCESS
+======================================
 ```
 
-#### GPU Compatibility
+On failure the footer names the stage, shows the actual Python error instead of a wrapped one, and adds a hint for known causes (torchcodec mismatch, CUDA out of memory, missing Hugging Face token, cuDNN not found). The token value and transcript text are never written.
 
-Scriberr provides separate Docker images for different NVIDIA GPU generations due to CUDA/PyTorch compatibility requirements:
+## Model notes (RTX 3060 12 GB)
 
-| GPU Generation | Compute Capability | Docker Image | Docker Compose File |
-|:---|:---|:---|:---|
-| GTX 10-series (Pascal) | sm_61 | `scriberr-cuda` | `docker-compose.cuda.yml` |
-| RTX 20-series (Turing) | sm_75 | `scriberr-cuda` | `docker-compose.cuda.yml` |
-| RTX 30-series (Ampere) | sm_86 | `scriberr-cuda` | `docker-compose.cuda.yml` |
-| RTX 40-series (Ada Lovelace) | sm_89 | `scriberr-cuda` | `docker-compose.cuda.yml` |
-| **RTX 50-series (Blackwell)** | sm_120 | `scriberr-cuda-blackwell` | `docker-compose.blackwell.yml` |
+Measured on a 68-minute, two-speaker recording with PyAnnote diarization, end to end through the API:
 
-**RTX 50-series users (RTX 5080, 5090, etc.):** You must use the Blackwell-specific image. The standard CUDA image will not work due to PyTorch CUDA compatibility requirements. Use:
+| Model | Time | Notes |
+|---|---|---|
+| WhisperX large-v3 (float16, batch 4) | 263 s | Default. Best accuracy |
+| WhisperX large-v3-turbo | 223 s | About a dozen fewer words than large-v3 |
+| WhisperX medium.en | 229 s | |
+| WhisperX small / small.en | ~201 s | Repetition loops seen |
+| WhisperX base.en | 191 s | |
+| Parakeet tdt-0.6b-v3 + PyAnnote community-1 | 347 s | Fast transcription (111 s), slower separate diarization |
+| Canary 1b-v2 | | No chunking; too slow for long files |
 
-```bash
-docker compose -f docker-compose.blackwell.yml up -d
-```
+About 185 s of every WhisperX run is fixed cost (model loading and diarization), so smaller models save less than expected.
 
-Or for local builds:
+Recommended profile: `large-v3`, `cuda`, `float16`, batch size 4, language set explicitly, PyAnnote VAD onset 0.5 / offset 0.363, PyAnnote diarization with min and max speakers set when known. Lowering VAD onset to 0.3 or switching to Silero recovered some muffled speech but dropped more elsewhere.
 
-```bash
-docker compose -f docker-compose.build.blackwell.yml up -d
-```
+## Credits and license
 
-### App Startup
+Scriberr was created by [Rishikanth Chandrasekaran](https://github.com/rishikanthc) and its contributors; the upstream pull requests listed above are their work. If Scriberr is useful to you, consider [supporting the original author](https://ko-fi.com/H2H41KQZA3).
 
-When you run Scriberr for the first time, it may take several minutes to start. This is normal!
-
-The application needs to:
-1.  Initialize the Python environments.
-2.  Download the necessary machine learning models (Whisper, PyAnnote, NVIDIA NeMo).
-3.  Configure the database.
-
-**Subsequent runs will be much faster** because all models and environments are persisted to the `env_data` volume (or your local mapped folders).
-
-You will know the application is ready when you see the line: `msg="Scriberr is ready" url=http://0.0.0.0:8080`.
-
-### Troubleshooting
-
-#### 1. SQLite OOM Error (out of memory)
-
-If you see an "out of memory (14)" error from SQLite (specifically `SQLITE_CANTOPEN`), it usually means a permissions issue. The database engine cannot create temporary files in the data directory.
-
-You can fix this by setting the `PUID` and `PGID` in your `docker-compose.yml` to match your host user's UID and GID, or by manually changing the ownership of the mapped folders on your host:
-
-```bash
-# If you used a named volume (e.g., 'scriberr_scriberr_data'):
-sudo chown -R 1000:1000 /var/lib/docker/volumes/scriberr_scriberr_data/_data
-
-# If you mapped a specific host folder (e.g., ./scriberr_data):
-sudo chown -R 1000:1000 ./scriberr_data
-sudo chown -R 1000:1000 ./env_data
-```
-
-Replace `1000` with the value you set for `PUID`/`PGID` (default is `1000`).
-
-#### 2. "Unable to load audio stream"
-
-If the application loads but you cannot play or see the audio waveform (receiving "Unable to load audio stream"), this is often due to the **Secure Cookies** security flag.
-
-By default, when `APP_ENV=production`, Scriberr enables `SECURE_COOKIES=true`. This prevents cookies from being sent over insecure (HTTP) connections.
-
-**Solutions:**
-- **Recommended:** Deploy Scriberr behind a Reverse Proxy (like Nginx, Caddy, or Traefik) and use SSL/TLS (HTTPS).
-- **Alternative:** If you must access over plain HTTP, set the following environment variable in your `docker-compose.yml`:
-  ```yaml
-  environment:
-    - SECURE_COOKIES=false
-  ```
-
-## Post installation
-
-Once you have Scriberr up and running:
-
-- **Configure Diarization**: To enable speaker identification, visit the [Configuration page](https://scriberr.app/docs/configuration).
-- **Usage Guide**: For a detailed usage guide, visit [https://scriberr.app/docs/usage](https://scriberr.app/docs/usage).
-
-## LLM Disclosure
-
-This project was developed using AI agents as pair programmer. It was NOT vibe coded. For context I’m a ML/AI researcher by profession and I have been programming for over a decade now. The codebase follows software engineering best practices and principles and all architecture decisions were made by me. All code generated by LLMs was reviewed and tested to the best of my abilities.
-
-## Donating
-
-<a href='https://ko-fi.com/H2H41KQZA3' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
-
+MIT License, same as upstream. See [LICENSE](LICENSE).

@@ -2255,10 +2255,15 @@ func (h *Handler) GetSupportedModels(c *gin.Context) {
 // @Success 200 {object} map[string]string
 // @Router /health [get]
 func (h *Handler) HealthCheck(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":  "healthy",
-		"version": "1.0.0",
-	})
+	body := startupStatus()
+	body["version"] = "1.0.0"
+	if !IsReady() {
+		// 503 until model environments are ready, so Docker and proxies
+		// report "starting" rather than healthy.
+		c.JSON(http.StatusServiceUnavailable, body)
+		return
+	}
+	c.JSON(http.StatusOK, body)
 }
 
 // Helper functions
