@@ -57,6 +57,8 @@ ENV PYTHONUNBUFFERED=1 \
   DATABASE_PATH=/app/data/scriberr.db \
   UPLOAD_DIR=/app/data/uploads \
   WHISPERX_ENV=/app/whisperx-env \
+  # uv-managed Python on the env volume, so venvs survive container recreation
+  UV_PYTHON_INSTALL_DIR=/app/whisperx-env/.uv-python \
   APP_ENV=production \
   PUID=1000 \
   PGID=1000 \
