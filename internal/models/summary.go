@@ -9,14 +9,17 @@ import (
 
 // SummaryTemplate represents a saved summarization prompt/template
 type SummaryTemplate struct {
-	ID                 string    `json:"id" gorm:"primaryKey;type:varchar(36)"`
-	Name               string    `json:"name" gorm:"type:varchar(255);not null"`
-	Description        *string   `json:"description,omitempty" gorm:"type:text"`
-	Model              string    `json:"model" gorm:"type:varchar(255);not null;default:''"`
-	Prompt             string    `json:"prompt" gorm:"type:text;not null"`
-	IncludeSpeakerInfo bool      `json:"include_speaker_info" gorm:"default:false"`
-	CreatedAt          time.Time `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt          time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	ID                 string  `json:"id" gorm:"primaryKey;type:varchar(36)"`
+	Name               string  `json:"name" gorm:"type:varchar(255);not null"`
+	Description        *string `json:"description,omitempty" gorm:"type:text"`
+	Model              string  `json:"model" gorm:"type:varchar(255);not null;default:''"`
+	Prompt             string  `json:"prompt" gorm:"type:text;not null"`
+	IncludeSpeakerInfo bool    `json:"include_speaker_info" gorm:"default:false"`
+	// Reasoning lets reasoning models (qwen3, deepseek-r1) think before
+	// answering. Off by default: summaries rarely need it and it is slower.
+	Reasoning bool      `json:"reasoning" gorm:"default:false"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (st *SummaryTemplate) BeforeCreate(tx *gorm.DB) error {

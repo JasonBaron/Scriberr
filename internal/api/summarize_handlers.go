@@ -48,6 +48,24 @@ func (h *Handler) Summarize(c *gin.Context) {
 		return
 	}
 
+	// Local LLMs share the GPU with transcription; refuse rather than wait.
+	releaseGPU, ok := tryLocalLLMGPU(svc)
+	if !ok {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gpuBusyMessage})
+		return
+	}
+	defer releaseGPU()
+
+	// Reasoning models think only if the template asks for it
+	ctx := c.Request.Context()
+	reasoning := false
+	if req.TemplateID != nil && *req.TemplateID != "" {
+		if tpl, err := h.summaryRepo.FindByID(ctx, *req.TemplateID); err == nil && tpl != nil {
+			reasoning = tpl.Reasoning
+		}
+	}
+	ctx = llm.WithThinking(ctx, reasoning)
+
 	// Prepare chat messages: simple single-user message with full content
 	messages := []llm.ChatMessage{{Role: "user", Content: req.Content}}
 
@@ -62,12 +80,14 @@ func (h *Handler) Summarize(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no") // Disable nginx buffering
 	c.Status(http.StatusOK)             // Start response immediately
 
-	h.processSummarization(c, req, svc, messages, start)
+	summary, completed := h.processSummarization(c, ctx, req, svc, messages, start)
+	h.afterSummary(ctx, req, svc, summary, completed)
+	unloadAfterSummary(svc, req.Model)
 }
 
-func (h *Handler) processSummarization(c *gin.Context, req SummarizeRequest, svc llm.Service, messages []llm.ChatMessage, start time.Time) {
+func (h *Handler) processSummarization(c *gin.Context, reqCtx context.Context, req SummarizeRequest, svc llm.Service, messages []llm.ChatMessage, start time.Time) (string, bool) {
 	// Allow longer generation time for large transcripts and smaller models
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Minute)
+	ctx, cancel := context.WithTimeout(reqCtx, 60*time.Minute)
 	defer cancel()
 
 	contentChan, errChan := svc.ChatCompletionStream(ctx, req.Model, messages, 0.0)
@@ -89,7 +109,7 @@ func (h *Handler) processSummarization(c *gin.Context, req SummarizeRequest, svc
 				// Persist summary once streaming completes
 				h.persistSummary(req, finalText)
 				log.Printf("[summarize] complete transcription_id=%s model=%s bytes=%d duration_ms=%d", req.TranscriptionID, req.Model, len(finalText), time.Since(start).Milliseconds())
-				return
+				return finalText, true
 			}
 			finalText += chunk
 			_, _ = writer.WriteString(chunk)
@@ -107,12 +127,12 @@ func (h *Handler) processSummarization(c *gin.Context, req SummarizeRequest, svc
 			}
 			// Persist any partial content on error
 			h.persistSummary(req, finalText)
-			return
+			return finalText, false
 		case <-ctx.Done():
 			// Persist any partial content on timeout/cancel
 			h.persistSummary(req, finalText)
 			log.Printf("[summarize] timeout/cancel transcription_id=%s model=%s bytes=%d duration_ms=%d", req.TranscriptionID, req.Model, len(finalText), time.Since(start).Milliseconds())
-			return
+			return finalText, false
 		}
 	}
 }

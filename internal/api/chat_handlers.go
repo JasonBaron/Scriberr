@@ -561,6 +561,14 @@ func (h *Handler) SendChatMessage(c *gin.Context) {
 		return
 	}
 
+	// Local LLMs share the GPU with transcription; refuse rather than wait.
+	releaseGPU, gpuOK := tryLocalLLMGPU(svc)
+	if !gpuOK {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gpuBusyMessage})
+		return
+	}
+	defer releaseGPU()
+
 	// Set up streaming response with context info headers
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")

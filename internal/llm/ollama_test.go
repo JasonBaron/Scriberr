@@ -119,3 +119,102 @@ func TestModelMaxUnknownFallsBackToCap(t *testing.T) {
 		t.Errorf("GetContextWindow = %d, want %d", w, defaultNumCtxMax)
 	}
 }
+
+// fakeOllamaFull serves /api/show with per-model capabilities, records chat
+// requests, lists loaded models on /api/ps and records unloads.
+func fakeOllamaFull(t *testing.T, caps map[string][]string, loaded []string) (*httptest.Server, func() []ollamaChatRequest, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var chats []ollamaChatRequest
+	var unloads []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/show":
+			var req ollamaShowRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"capabilities": caps[req.Name],
+				"model_info":   map[string]any{"qwen3.context_length": 40960},
+			})
+		case "/api/chat":
+			var req ollamaChatRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			mu.Lock()
+			chats = append(chats, req)
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"model": req.Model, "done": true,
+				"message": map[string]any{"role": "assistant", "content": "ok"},
+			})
+		case "/api/ps":
+			ms := []map[string]any{}
+			for _, m := range loaded {
+				ms = append(ms, map[string]any{"name": m, "model": m})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": ms})
+		case "/api/generate":
+			var req map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if ka, ok := req["keep_alive"].(float64); ok && ka == 0 {
+				mu.Lock()
+				unloads = append(unloads, req["model"].(string))
+				mu.Unlock()
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"done": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv,
+		func() []ollamaChatRequest { mu.Lock(); defer mu.Unlock(); return chats },
+		func() []string { mu.Lock(); defer mu.Unlock(); return unloads }
+}
+
+func TestThinkSentOnlyToThinkingModels(t *testing.T) {
+	srv, chats, _ := fakeOllamaFull(t, map[string][]string{
+		"qwen3:8b":            {"completion", "thinking"},
+		"qwen2.5:7b-instruct": {"completion"},
+	}, nil)
+	s := NewOllamaService(srv.URL)
+	msgs := []ChatMessage{{Role: "user", Content: "hi"}}
+
+	off := WithThinking(context.Background(), false)
+	_, _ = s.ChatCompletion(off, "qwen3:8b", msgs, 0)
+	_, _ = s.ChatCompletion(off, "qwen2.5:7b-instruct", msgs, 0)
+	_, _ = s.ChatCompletion(context.Background(), "qwen3:8b", msgs, 0) // no preference set
+	on := WithThinking(context.Background(), true)
+	_, _ = s.ChatCompletion(on, "qwen3:8b", msgs, 0)
+
+	got := chats()
+	if len(got) != 4 {
+		t.Fatalf("got %d chat requests", len(got))
+	}
+	if got[0].Think == nil || *got[0].Think {
+		t.Errorf("qwen3 with thinking off: think = %v, want false", got[0].Think)
+	}
+	if got[1].Think != nil {
+		t.Errorf("non-thinking model must not get a think flag, got %v", *got[1].Think)
+	}
+	if got[2].Think != nil {
+		t.Errorf("no preference must leave the model default, got %v", *got[2].Think)
+	}
+	if got[3].Think == nil || !*got[3].Think {
+		t.Errorf("qwen3 with thinking on: think = %v, want true", got[3].Think)
+	}
+	if !s.SupportsThinking(context.Background(), "qwen3:8b") || s.SupportsThinking(context.Background(), "qwen2.5:7b-instruct") {
+		t.Error("SupportsThinking mismatch")
+	}
+}
+
+func TestUnloadAll(t *testing.T) {
+	srv, _, unloads := fakeOllamaFull(t, nil, []string{"qwen3:8b", "llama3.1:8b"})
+	s := NewOllamaService(srv.URL)
+	got, err := s.UnloadAll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || len(unloads()) != 2 || unloads()[0] != "qwen3:8b" {
+		t.Errorf("unloaded %v, server saw %v", got, unloads())
+	}
+}
