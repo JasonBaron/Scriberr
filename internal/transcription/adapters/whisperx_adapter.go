@@ -293,12 +293,22 @@ func (w *WhisperXAdapter) GetSupportedModels() []string {
 
 // PrepareEnvironment sets up the WhisperX environment
 func (w *WhisperXAdapter) PrepareEnvironment(ctx context.Context) error {
+	defer lockEnv(w.envPath)()
+
 	logger.Info("Preparing WhisperX environment", "env_path", w.envPath)
+
+	ensureNLTKDataDir()
 
 	whisperxPath := filepath.Join(w.envPath, "WhisperX")
 
 	// Check if WhisperX is already set up and working (using cache to speed up repeated checks)
 	if CheckEnvironmentReady(whisperxPath, "import whisperx") {
+		// A working env is left on whatever commit it has; report drift from the pin.
+		if head := gitHead(whisperxPath); head != "" && !strings.HasPrefix(head, whisperXRef()) && !strings.HasPrefix(whisperXRef(), head) {
+			logger.Warn("WhisperX checkout differs from the pinned commit; delete the WhisperX folder to reinstall at the pin",
+				"current", head, "pinned", whisperXRef())
+		}
+		w.migrateVADCheckpoint(whisperxPath)
 		logger.Info("WhisperX environment already ready")
 		w.initialized = true
 		return nil
@@ -309,9 +319,9 @@ func (w *WhisperXAdapter) PrepareEnvironment(ctx context.Context) error {
 		return fmt.Errorf("failed to create environment directory: %w", err)
 	}
 
-	// Clone WhisperX
-	if err := w.cloneWhisperX(); err != nil {
-		return fmt.Errorf("failed to clone WhisperX: %w", err)
+	// Clone WhisperX, or reuse an existing checkout, at the pinned commit
+	if err := w.ensureWhisperXCheckout(whisperxPath); err != nil {
+		return fmt.Errorf("failed to prepare WhisperX source: %w", err)
 	}
 
 	// Update dependencies
@@ -324,20 +334,131 @@ func (w *WhisperXAdapter) PrepareEnvironment(ctx context.Context) error {
 		return fmt.Errorf("failed to sync WhisperX: %w", err)
 	}
 
+	w.migrateVADCheckpoint(whisperxPath)
+
 	w.initialized = true
 	logger.Info("WhisperX environment prepared successfully")
 	return nil
 }
 
-// cloneWhisperX clones the WhisperX repository
-func (w *WhisperXAdapter) cloneWhisperX() error {
-	cmd := exec.Command("git", "clone", "https://github.com/m-bain/WhisperX.git")
-	cmd.Dir = w.envPath
-	out, err := cmd.CombinedOutput()
+const (
+	// DefaultWhisperXRef is the WhisperX commit this build is validated against
+	// (m-bain/WhisperX main, 2026-09-26). Override with SCRIBERR_WHISPERX_REF.
+	DefaultWhisperXRef = "771b4a14a9486f8fd5aef18ef49e35d639523dd3"
+	// EnvWhisperXRef overrides the WhisperX commit, tag or branch to install.
+	EnvWhisperXRef = "SCRIBERR_WHISPERX_REF"
+
+	whisperXRepoURL = "https://github.com/m-bain/WhisperX.git"
+	// vadCheckpointMarker records that the bundled VAD checkpoint was upgraded.
+	vadCheckpointMarker = ".scriberr-vad-checkpoint-migrated"
+)
+
+func whisperXRef() string {
+	if v := strings.TrimSpace(os.Getenv(EnvWhisperXRef)); v != "" {
+		return v
+	}
+	return DefaultWhisperXRef
+}
+
+// gitHead returns the checked-out commit of dir, or "" if it is not a git checkout.
+func gitHead(dir string) string {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
 	if err != nil {
-		return fmt.Errorf("git clone failed: %w: %s", err, strings.TrimSpace(string(out)))
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func runGit(dir string, args ...string) error {
+	cmd := exec.Command("git", append([]string{"-c", "advice.detachedHead=false"}, args...)...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// ensureWhisperXCheckout puts the WhisperX source at the pinned ref. An existing
+// checkout is reused (a plain "git clone" fails when the folder already exists,
+// which left half-installed envs unrecoverable).
+func (w *WhisperXAdapter) ensureWhisperXCheckout(whisperxPath string) error {
+	ref := whisperXRef()
+
+	if _, err := os.Stat(filepath.Join(whisperxPath, ".git")); err == nil {
+		logger.Info("Reusing existing WhisperX checkout", "path", whisperxPath, "ref", ref)
+		// Fetch can fail offline; checkout still works if the ref is already present.
+		if err := runGit(whisperxPath, "fetch", "--quiet", "origin"); err != nil {
+			logger.Warn("WhisperX fetch failed, trying local checkout", "error", err)
+		}
+	} else if _, err := os.Stat(whisperxPath); err == nil {
+		return fmt.Errorf("%s exists but is not a git checkout; move it aside and restart", whisperxPath)
+	} else {
+		logger.Info("Cloning WhisperX", "ref", ref)
+		if err := runGit(w.envPath, "clone", "--quiet", whisperXRepoURL, filepath.Base(whisperxPath)); err != nil {
+			return err
+		}
+	}
+
+	// -f discards Scriberr's earlier pyproject edits; they are re-applied next.
+	if err := runGit(whisperxPath, "checkout", "--quiet", "-f", ref); err != nil {
+		return err
+	}
+	_ = os.Remove(filepath.Join(whisperxPath, vadCheckpointMarker)) // checkout restored the original file
+	return nil
+}
+
+// ensureNLTKDataDir creates $NLTK_DATA if set. NLTK only downloads into an
+// existing, writable directory on its search path and otherwise falls back to
+// ~/nltk_data in the container layer, which is lost on every recreate. WhisperX
+// downloads punkt_tab during alignment and fails the job if that download fails.
+func ensureNLTKDataDir() {
+	dir := strings.TrimSpace(os.Getenv("NLTK_DATA"))
+	if dir == "" {
+		return
+	}
+	// NLTK_DATA may list several paths; the first is where downloads go.
+	if i := strings.IndexByte(dir, os.PathListSeparator); i >= 0 {
+		dir = dir[:i]
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		logger.Warn("Could not create NLTK data directory", "path", dir, "error", err)
+	}
+}
+
+// vadMigrationScript upgrades WhisperX's bundled VAD checkpoint (saved with
+// Lightning 1.5.4) so it is not re-upgraded in memory, with a warning, on every job.
+// The file ships with WhisperX and is already fully loaded by it on each run.
+const vadMigrationScript = `
+import torch
+from lightning.pytorch.utilities.migration import migrate_checkpoint
+p = "whisperx/assets/pytorch_model.bin"
+ck = torch.load(p, map_location="cpu", weights_only=False)
+ck, applied = migrate_checkpoint(ck)
+if applied:
+    torch.save(ck, p)
+print("migrations applied:", list(applied) or "none")
+`
+
+// migrateVADCheckpoint runs once per checkout (tracked by a marker file).
+// Failure only leaves the cosmetic warning in place, so it never fails setup.
+func (w *WhisperXAdapter) migrateVADCheckpoint(whisperxPath string) {
+	marker := filepath.Join(whisperxPath, vadCheckpointMarker)
+	if _, err := os.Stat(marker); err == nil {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(whisperxPath, "whisperx", "assets", "pytorch_model.bin")); err != nil {
+		return
+	}
+	cmd := exec.Command("uv", "run", UVTLSFlag, "--project", whisperxPath, "python", "-c", vadMigrationScript)
+	cmd.Dir = whisperxPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		logger.Warn("WhisperX VAD checkpoint upgrade failed (harmless; Lightning warning stays)",
+			"error", err, "output", strings.TrimSpace(string(out)))
+		return
+	}
+	logger.Info("WhisperX VAD checkpoint upgraded", "result", strings.TrimSpace(string(out)))
+	_ = os.WriteFile(marker, []byte(time.Now().Format(time.RFC3339)+"\n"), 0644)
 }
 
 // updateWhisperXDependencies modifies WhisperX pyproject.toml

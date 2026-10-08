@@ -8,14 +8,92 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 // OllamaService handles Ollama API interactions
 type OllamaService struct {
-	baseURL string
-	client  *http.Client
+	baseURL  string
+	client   *http.Client
+	ctxCache sync.Map // model -> max context length (int)
+}
+
+// Ollama runs every request with its default context window (2048 or 4096
+// tokens) unless num_ctx is sent, and silently drops whatever does not fit.
+// A long transcript then gets summarised from its last few minutes only.
+// Each request now sets num_ctx sized to the prompt.
+const (
+	// EnvOllamaNumCtx forces a fixed num_ctx for every request.
+	EnvOllamaNumCtx = "OLLAMA_NUM_CTX"
+	// EnvOllamaNumCtxMax caps the automatic size (KV cache uses GPU memory).
+	EnvOllamaNumCtxMax = "OLLAMA_NUM_CTX_MAX"
+
+	defaultNumCtxMax = 32768
+	minNumCtx        = 8192
+	replyHeadroom    = 4096 // tokens left for the model's answer
+	charsPerToken    = 3    // conservative; English averages closer to 4
+)
+
+func envInt(key string) int {
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv(key))); err == nil && v > 0 {
+		return v
+	}
+	return 0
+}
+
+// numCtx picks the context window for a request: enough for the prompt plus
+// room for the reply, rounded up to 2048, at least minNumCtx, and no more than
+// the cap or the model's own maximum.
+func (s *OllamaService) numCtx(ctx context.Context, model string, messages []ChatMessage) int {
+	if fixed := envInt(EnvOllamaNumCtx); fixed > 0 {
+		return fixed
+	}
+	limit := envInt(EnvOllamaNumCtxMax)
+	if limit == 0 {
+		limit = defaultNumCtxMax
+	}
+	if modelMax := s.modelMaxContext(ctx, model); modelMax > 0 && modelMax < limit {
+		limit = modelMax
+	}
+
+	chars := 0
+	for _, m := range messages {
+		chars += len(m.Content) + len(m.Role) + 8
+	}
+	need := chars/charsPerToken + replyHeadroom
+	need = (need + 2047) / 2048 * 2048
+	if need < minNumCtx {
+		need = minNumCtx
+	}
+	if need > limit {
+		need = limit
+	}
+	return need
+}
+
+// modelMaxContext returns the model's trained context length (cached), or 0.
+func (s *OllamaService) modelMaxContext(ctx context.Context, model string) int {
+	if v, ok := s.ctxCache.Load(model); ok {
+		return v.(int)
+	}
+	n, found := s.showContextLength(ctx, model)
+	if !found {
+		return 0
+	}
+	s.ctxCache.Store(model, n)
+	return n
+}
+
+func (s *OllamaService) requestOptions(ctx context.Context, model string, messages []ChatMessage, temperature float64) map[string]any {
+	opts := map[string]any{"num_ctx": s.numCtx(ctx, model, messages)}
+	if temperature > 0 {
+		opts["temperature"] = temperature
+	}
+	return opts
 }
 
 // NewOllamaService creates a new Ollama service
@@ -101,9 +179,7 @@ func (s *OllamaService) ChatCompletion(ctx context.Context, model string, messag
 		Messages: msgs,
 		Stream:   false,
 	}
-	if temperature > 0 {
-		reqBody.Options = map[string]any{"temperature": temperature}
-	}
+	reqBody.Options = s.requestOptions(ctx, model, messages, temperature)
 	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -157,9 +233,7 @@ func (s *OllamaService) ChatCompletionStream(ctx context.Context, model string, 
 			msgs = append(msgs, ollamaChatMessage(m))
 		}
 		reqBody := ollamaChatRequest{Model: model, Messages: msgs, Stream: true}
-		if temperature > 0 {
-			reqBody.Options = map[string]any{"temperature": temperature}
-		}
+		reqBody.Options = s.requestOptions(ctx, model, messages, temperature)
 
 		data, err := json.Marshal(reqBody)
 		if err != nil {
@@ -239,75 +313,65 @@ type ollamaShowResponse struct {
 	Parameters string `json:"parameters"`
 }
 
-// GetContextWindow returns the context window size for a given Ollama model
+// GetContextWindow returns the context window Scriberr can use for a model:
+// the model's maximum, limited by the num_ctx cap (or the fixed value), since
+// that is the most Ollama will be asked to hold.
 func (s *OllamaService) GetContextWindow(ctx context.Context, model string) (int, error) {
-	// Default to 4096 if we can't determine
-	defaultContext := 4096
-
-	reqBody := ollamaShowRequest{
-		Name: model,
+	if fixed := envInt(EnvOllamaNumCtx); fixed > 0 {
+		return fixed, nil
 	}
-	data, err := json.Marshal(reqBody)
+	limit := envInt(EnvOllamaNumCtxMax)
+	if limit == 0 {
+		limit = defaultNumCtxMax
+	}
+	if n := s.modelMaxContext(ctx, model); n > 0 && n < limit {
+		return n, nil
+	}
+	return limit, nil
+}
+
+// showContextLength asks Ollama for the model's context length.
+func (s *OllamaService) showContextLength(ctx context.Context, model string) (int, bool) {
+	data, err := json.Marshal(ollamaShowRequest{Name: model})
 	if err != nil {
-		return defaultContext, nil
+		return 0, false
 	}
-
 	req, err := http.NewRequestWithContext(ctx, "POST", s.baseURL+"/api/show", bytes.NewBuffer(data))
 	if err != nil {
-		return defaultContext, nil
+		return 0, false
 	}
 	req.Header.Set("Content-Type", "application/json")
-
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return defaultContext, nil
+		return 0, false
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return defaultContext, nil
+		return 0, false
 	}
-
 	var showResp ollamaShowResponse
 	if err := json.NewDecoder(resp.Body).Decode(&showResp); err != nil {
-		return defaultContext, nil
+		return 0, false
 	}
 
-	// Try to find context length in details
-	// Note: Ollama API response format varies.
-	// Sometimes it's in model_info -> llama.context_length
-	// Sometimes it's in parameters string "num_ctx 8192"
-
-	// Check model_info
-	if showResp.ModelInfo != nil {
-		for k, v := range showResp.ModelInfo {
-			if strings.Contains(k, "context_length") {
-				if f, ok := v.(float64); ok {
-					fmt.Printf("Debug: Found context length in model_info: %f\n", f)
-					return int(f), nil
-				}
+	// The format varies by Ollama version: model_info["<arch>.context_length"],
+	// details.context_length, or "num_ctx N" in the parameters string.
+	for k, v := range showResp.ModelInfo {
+		if strings.HasSuffix(k, "context_length") {
+			if f, ok := v.(float64); ok && f > 0 {
+				return int(f), true
 			}
 		}
 	}
-
-	// Parse parameters string
-	if showResp.Parameters != "" {
-		lines := strings.Split(showResp.Parameters, "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "num_ctx") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					var ctxLen int
-					if _, err := fmt.Sscanf(parts[1], "%d", &ctxLen); err == nil {
-						fmt.Printf("Debug: Found context length in parameters: %d\n", ctxLen)
-						return ctxLen, nil
-					}
-				}
+	if showResp.Details.ContextLength > 0 {
+		return showResp.Details.ContextLength, true
+	}
+	for _, line := range strings.Split(showResp.Parameters, "\n") {
+		if f := strings.Fields(line); len(f) >= 2 && f[0] == "num_ctx" {
+			if n, err := strconv.Atoi(f[1]); err == nil && n > 0 {
+				return n, true
 			}
 		}
 	}
-
-	fmt.Printf("Debug: Ollama context window for model %s: %d (default: %d)\n", model, defaultContext, 4096)
-	return defaultContext, nil
+	return 0, false
 }

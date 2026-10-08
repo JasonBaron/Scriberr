@@ -25,6 +25,21 @@ import (
 // image pins a uv version that supports the new one (see Dockerfile UV_VERSION).
 const UVTLSFlag = "--system-certs"
 
+// envLocks serialises environment setup per directory. Parakeet and Canary
+// share one env, and parallel startup used to run two installs into it at
+// once and corrupt it. Different envs still prepare in parallel.
+var envLocks sync.Map // cleaned path -> *sync.Mutex
+
+// lockEnv locks the env directory and returns the unlock func:
+//
+//	defer lockEnv(path)()
+func lockEnv(path string) func() {
+	m, _ := envLocks.LoadOrStore(filepath.Clean(path), &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
 // Environment readiness cache to avoid repeated expensive UV checks
 var (
 	envCacheMutex sync.RWMutex

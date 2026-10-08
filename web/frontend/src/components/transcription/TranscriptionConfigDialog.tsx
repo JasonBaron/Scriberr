@@ -1,4 +1,4 @@
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, memo, createContext, useContext } from "react";
 import {
     Dialog,
     DialogContent,
@@ -224,6 +224,34 @@ const PARAM_DESCRIPTIONS = {
 };
 
 // ============================================================================
+// Enabled models (SCRIBERR_ENABLED_MODELS)
+// ============================================================================
+
+// Backend model ID behind each option. Options whose model is not enabled on the
+// server are hidden; null means the server enables everything.
+const FAMILY_MODEL_ID: Record<string, string> = {
+    whisper: "whisperx",
+    nvidia_parakeet: "parakeet",
+    nvidia_canary: "canary",
+    mistral_voxtral: "voxtral",
+    openai: "openai_whisper",
+};
+const DIARIZE_MODEL_ID: Record<string, string> = {
+    pyannote: "pyannote",
+    nvidia_sortformer: "sortformer",
+};
+
+const EnabledModelsContext = createContext<string[] | null>(null);
+
+/** Keeps options whose model is enabled, plus the current value so an existing profile still shows. */
+function filterEnabled<T extends { value: string }>(
+    options: T[], idMap: Record<string, string>, enabled: string[] | null, current: string,
+): T[] {
+    if (!enabled) return options;
+    return options.filter(o => o.value === current || !idMap[o.value] || enabled.includes(idMap[o.value]));
+}
+
+// ============================================================================
 // Main Component
 // ============================================================================
 
@@ -249,6 +277,20 @@ export const TranscriptionConfigDialog = memo(function TranscriptionConfigDialog
     const [validationMessage, setValidationMessage] = useState("");
     const { getAuthHeaders } = useAuth();
     const [availableModels, setAvailableModels] = useState<string[]>(["whisper-1"]);
+    const [enabledModels, setEnabledModels] = useState<string[] | null>(null);
+
+    // Which models the server has enabled (hides the rest)
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        fetch('/api/v1/transcription/models', { headers: getAuthHeaders() })
+            .then(r => (r.ok ? r.json() : null))
+            .then(data => {
+                if (!cancelled && data) setEnabledModels(Array.isArray(data.enabled_models) ? data.enabled_models : null);
+            })
+            .catch(() => { /* keep showing everything */ });
+        return () => { cancelled = true; };
+    }, [open, getAuthHeaders]);
 
     // Reset when dialog opens
     useEffect(() => {
@@ -367,13 +409,13 @@ export const TranscriptionConfigDialog = memo(function TranscriptionConfigDialog
                         description="Choose the AI model for transcription. Each has different capabilities and requirements."
                         value={params.model_family}
                         onValueChange={(v) => updateParam('model_family', v)}
-                        options={[
+                        options={filterEnabled([
                             { value: "whisper", label: "Whisper" },
                             { value: "nvidia_parakeet", label: "NVIDIA Parakeet" },
                             { value: "nvidia_canary", label: "NVIDIA Canary" },
                             { value: "mistral_voxtral", label: "Mistral Voxtral" },
                             { value: "openai", label: "OpenAI" },
-                        ]}
+                        ], FAMILY_MODEL_ID, enabledModels, params.model_family)}
                     />
 
                     {/* Multi-track notice */}
@@ -384,6 +426,7 @@ export const TranscriptionConfigDialog = memo(function TranscriptionConfigDialog
                     )}
 
                     {/* Model-Specific Configuration */}
+                    <EnabledModelsContext.Provider value={enabledModels}>
                     {params.model_family === "whisper" && (
                         <WhisperConfig params={params} updateParam={updateParam} isMultiTrack={isMultiTrack} />
                     )}
@@ -404,6 +447,7 @@ export const TranscriptionConfigDialog = memo(function TranscriptionConfigDialog
                     {params.model_family === "mistral_voxtral" && (
                         <VoxtralConfig params={params} updateParam={updateParam} />
                     )}
+                    </EnabledModelsContext.Provider>
                 </div>
 
                 {/* Footer */}
@@ -445,6 +489,7 @@ function DiarizationSection({ id, params, updateParam, description }: {
     updateParam: <K extends keyof WhisperXParams>(key: K, value: WhisperXParams[K]) => void;
     description?: string;
 }) {
+    const enabledModels = useContext(EnabledModelsContext);
     return (
         <Section title="Speaker Diarization" description={description}>
             <div className="space-y-4">
@@ -456,10 +501,10 @@ function DiarizationSection({ id, params, updateParam, description }: {
                             label="Diarization Model"
                             value={params.diarize_model}
                             onValueChange={(v) => updateParam('diarize_model', v)}
-                            options={[
+                            options={filterEnabled([
                                 { value: "pyannote", label: "Pyannote" },
                                 { value: "nvidia_sortformer", label: "NVIDIA Sortformer" },
-                            ]}
+                            ], DIARIZE_MODEL_ID, enabledModels, params.diarize_model)}
                         />
 
                         <div className="grid grid-cols-2 gap-4">

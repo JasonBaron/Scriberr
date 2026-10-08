@@ -166,6 +166,8 @@ func (c *CanaryAdapter) GetSupportedModels() []string {
 
 // PrepareEnvironment sets up the Canary environment (shared with Parakeet)
 func (c *CanaryAdapter) PrepareEnvironment(ctx context.Context) error {
+	defer lockEnv(c.envPath)()
+
 	logger.Info("Preparing NVIDIA Canary environment", "env_path", c.envPath)
 
 	// Copy transcription script
