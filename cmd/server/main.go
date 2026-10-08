@@ -120,13 +120,6 @@ func main() {
 	unifiedProcessor := transcription.NewUnifiedJobProcessor(jobRepo, cfg.TempDir, cfg.TranscriptsDir)
 	unifiedProcessor.GetUnifiedService().SetBroadcaster(broadcaster)
 
-	// Bootstrap embedded Python environment (for all adapters)
-	logger.Startup("python", "Preparing Python environment")
-	if err := unifiedProcessor.InitEmbeddedPythonEnv(); err != nil {
-		logger.Error("Failed to prepare Python environment", "error", err)
-		os.Exit(1)
-	}
-
 	// Initialize quick transcription service
 	logger.Startup("quick-transcription", "Initializing quick transcription service")
 	quickTranscriptionService, err := transcription.NewQuickTranscriptionService(cfg, unifiedProcessor, jobRepo)
@@ -135,10 +128,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize task queue
-	logger.Startup("queue", "Starting background processing")
+	// Create the task queue; it starts once model environments are ready
 	taskQueue := queue.NewTaskQueue(2, unifiedProcessor, jobRepo) // 2 workers
-	taskQueue.Start()
 	defer taskQueue.Stop()
 
 	// Initialize multi-track processor
@@ -167,7 +158,9 @@ func main() {
 		broadcaster,
 	)
 
-	// Set up router
+	// Set up router. Until model environments are ready, /health reports
+	// "starting" and API writes return 503 (see internal/api/startup.go).
+	api.BeginStartup()
 	router := api.SetupRoutes(handler, authService)
 
 	// Create server
@@ -187,9 +180,25 @@ func main() {
 
 	// Give the server a moment to start
 	time.Sleep(100 * time.Millisecond)
-	logger.Info("Scriberr is ready",
+	logger.Info("Web server listening; preparing model environments",
 		"url", fmt.Sprintf("http://%s:%s", cfg.Host, cfg.Port))
-	logger.Debug("API documentation available at /swagger/index.html")
+
+	// Prepare model environments in the background (can take minutes on a
+	// first install), then start processing. Until then /health returns 503
+	// "starting" and API writes are refused.
+	go func() {
+		logger.Startup("python", "Preparing Python environment")
+		if err := unifiedProcessor.InitEmbeddedPythonEnv(); err != nil {
+			logger.Error("Failed to prepare Python environment", "error", err)
+			os.Exit(1)
+		}
+		logger.Startup("queue", "Starting background processing")
+		taskQueue.Start()
+		api.MarkReady()
+		logger.Info("Scriberr is ready",
+			"url", fmt.Sprintf("http://%s:%s", cfg.Host, cfg.Port))
+		logger.Debug("API documentation available at /swagger/index.html")
+	}()
 
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)

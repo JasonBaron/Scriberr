@@ -50,7 +50,15 @@ if [ "$(id -u)" = "0" ]; then
     # Set up directories with proper ownership
     echo "Setting up data directories..."
     mkdir -p /app/data/uploads /app/data/transcripts /app/whisperx-env
-    chown -R "$PUID:$PGID" /app/data /app/whisperx-env
+    # A recursive chown of the model envs (tens of GB) took longer on every
+    # start. Only fix ownership when a top-level folder is owned by someone
+    # else, or when SCRIBERR_FIX_OWNERSHIP=true forces a full pass.
+    for dir in /app/data /app/whisperx-env; do
+        if [ "${SCRIBERR_FIX_OWNERSHIP:-false}" = "true" ] || [ "$(stat -c '%u:%g' "$dir")" != "$PUID:$PGID" ]; then
+            echo "Fixing ownership of $dir (this can take a while)..."
+            chown -R "$PUID:$PGID" "$dir"
+        fi
+    done
 
     echo "=== Setup Complete ==="
     echo "Switching to user appuser (UID=$PUID, GID=$PGID) and starting application..."

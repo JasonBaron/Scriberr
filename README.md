@@ -66,6 +66,9 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | | Ollama `num_ctx` sized to the prompt, so long transcripts are no longer silently cut to their last few minutes |
 | | Models not in `SCRIBERR_ENABLED_MODELS` hidden in the transcription dialog |
 | | WhisperX's bundled VAD checkpoint upgraded once, removing a per-job Lightning warning |
+| | Web UI and `/health` up within seconds of start; model checks run in the background and API writes return 503 until jobs can run. Docker `HEALTHCHECK` built in |
+| | Entrypoint no longer re-chowns tens of GB of model envs on every start |
+| | Time zone data embedded so `TZ` applies to log timestamps |
 
 ### Next
 
@@ -130,7 +133,9 @@ services:
 
 Keep both volumes on local disk. uv's cache and venvs fail with permission errors on some union filesystems (mergerfs in particular).
 
-The first start installs the model environments, which takes a while and downloads several GB. Later starts reuse them.
+The first start installs the model environments, which takes a while and downloads several GB. Later starts reuse them, but still check each one (about 30 to 90 s on a typical setup).
+
+The web server starts immediately. While the environments are checked, `/health` returns `503 {"status":"starting","startup":"40s so far"}`, sign-in and browsing work, and uploads or new jobs return 503 with a retry hint. Once jobs can run, `/health` returns `200 {"status":"healthy","startup":"88s"}`. The image has a Docker `HEALTHCHECK` on `/health` (15 minute start period for first installs), so a compose `healthcheck:` block is not needed.
 
 ## Configuration
 
@@ -149,6 +154,7 @@ Upstream settings (`HOST`, `PORT`, `DATABASE_PATH`, `ALLOWED_ORIGINS`, `SECURE_C
 | `UV_PYTHON_INSTALL_DIR` | `/app/whisperx-env/.uv-python` | Where uv installs Python (set in the image) |
 | `NLTK_DATA` | `/app/whisperx-env/.nltk_data` | WhisperX alignment tokenizer data (set in the image) |
 | `TZ` | UTC | Time zone for job log timestamps |
+| `SCRIBERR_FIX_OWNERSHIP` | `false` | Force a full `chown` of `/app/data` and `/app/whisperx-env` on start (otherwise only when the top-level owner is wrong) |
 
 For summaries and chat with Ollama, use Scriberr's **Ollama** provider. The OpenAI-compatible provider cannot pass `num_ctx`, so long transcripts get truncated there.
 

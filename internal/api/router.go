@@ -62,6 +62,9 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 		c.Next()
 	})
 
+	// Refuse API writes until model environments are ready (see startup.go)
+	router.Use(startupGate())
+
 	// Health check endpoint (no auth required)
 	router.GET("/health", handler.HealthCheck)
 
