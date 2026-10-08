@@ -86,7 +86,11 @@ func (h *Handler) UnloadLocalLLM(ctx context.Context) string {
 // title and tags, stores them as suggestions, and applies the title when the
 // current one is a placeholder (a file name, "New Recording", empty).
 func (h *Handler) afterSummary(ctx context.Context, req SummarizeRequest, svc llm.Service, summary string, completed bool) {
-	if !completed || strings.TrimSpace(summary) == "" || !envEnabled(titles.EnvSuggest) {
+	if !envEnabled(titles.EnvSuggest) {
+		return
+	}
+	if !completed || strings.TrimSpace(summary) == "" {
+		logger.Info("Title suggestion skipped: summary did not complete", "job_id", req.TranscriptionID)
 		return
 	}
 	job, err := h.jobRepo.FindByID(ctx, req.TranscriptionID)

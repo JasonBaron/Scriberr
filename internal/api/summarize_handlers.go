@@ -133,10 +133,15 @@ func (h *Handler) processSummarization(c *gin.Context, reqCtx context.Context, r
 				gotFirstChunk = true
 				log.Printf("[summarize] first_chunk transcription_id=%s model=%s at_ms=%d", req.TranscriptionID, req.Model, time.Since(start).Milliseconds())
 			}
-		case err := <-errChan:
-			if err != nil {
-				h.handleSummarizeError(c, req, svc, messages, err, finalText, start)
+		case err, ok := <-errChan:
+			if !ok || err == nil {
+				// The providers close errChan before contentChan, and
+				// contentChan is buffered. Stop watching errChan and keep
+				// draining content; a closed contentChan ends the stream.
+				errChan = nil
+				continue
 			}
+			h.handleSummarizeError(c, req, svc, messages, err, finalText, start)
 			// Persist any partial content on error
 			h.persistSummary(req, finalText)
 			return finalText, false
