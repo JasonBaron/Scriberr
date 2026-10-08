@@ -388,6 +388,8 @@ type SummaryRepository interface {
 	SaveSuggestions(ctx context.Context, jobID string, s models.JobSuggestion, applyTitle bool) error
 	SetTags(ctx context.Context, jobID string, tags models.StringList) error
 	TagCounts(ctx context.Context) ([]TagCount, error)
+	SetSummaryStatus(ctx context.Context, jobID, status string) error
+	ClearSummaryStatuses(ctx context.Context) (int64, error)
 }
 
 type summaryRepository struct {
@@ -743,6 +745,19 @@ func (r *summaryRepository) SetTags(ctx context.Context, jobID string, tags mode
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+// SetSummaryStatus records the state of an automatic summary ("" when done).
+func (r *summaryRepository) SetSummaryStatus(ctx context.Context, jobID, status string) error {
+	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).
+		Update("summary_status", status).Error
+}
+
+// ClearSummaryStatuses resets automatic summaries left pending by a restart.
+func (r *summaryRepository) ClearSummaryStatuses(ctx context.Context) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).
+		Where("summary_status IS NOT NULL AND summary_status <> ''").Update("summary_status", "")
+	return res.RowsAffected, res.Error
 }
 
 // TagCount is a tag and how many recordings use it.

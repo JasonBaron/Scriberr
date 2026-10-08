@@ -172,10 +172,24 @@ export const useTranscriptionEvents = (jobId: string | null) => {
             }
         };
 
+        // When a job finishes, reload the list from the server: the status
+        // event can be missed when the row stops being monitored, and an
+        // automatic summary may already be queued.
+        let refreshed = false;
+        const refreshOnFinish = () => {
+            if (refreshed) return;
+            refreshed = true;
+            queryClient.invalidateQueries({ queryKey: ['audioFiles'] });
+            setTimeout(() => queryClient.invalidateQueries({ queryKey: ['audioFiles'] }), 3000);
+        };
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const handleEvent = (event: any) => {
             if (event.type === 'job_update') {
                 const payload = event.payload as JobUpdateEvent['payload'];
+                if (payload.status === 'completed' || payload.status === 'failed') {
+                    refreshOnFinish();
+                }
 
                 queryClient.setQueriesData(
                     { queryKey: ['audioFiles'] },
@@ -189,6 +203,9 @@ export const useTranscriptionEvents = (jobId: string | null) => {
 
             if (event.type === 'pipeline_update') {
                 const payload = event.payload as PipelineUpdateEvent['payload'];
+                if (payload.stage === 'completed' || payload.stage === 'failed') {
+                    refreshOnFinish();
+                }
                 queryClient.setQueriesData(
                     { queryKey: ['audioFiles'] },
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any

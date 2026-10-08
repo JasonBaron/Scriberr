@@ -21,6 +21,7 @@ type TranscriptionJob struct {
 	Tags                  StringList     `json:"tags,omitempty" gorm:"type:text"`                      // shown and searchable; generated until edited by hand
 	TagsEdited            bool           `json:"tags_edited" gorm:"default:false"`                     // true once the user changed the tags
 	SummaryBrief          *string        `json:"summary_brief,omitempty" gorm:"type:text"`             // one-sentence summary for the list
+	SummaryStatus         string         `json:"summary_status,omitempty" gorm:"type:varchar(20)"`     // automatic summary: queued, running, or empty
 	RecordedAt            *time.Time     `json:"recorded_at,omitempty"`                                // from file metadata or the file's modified time; nil if unknown
 	RecordedAtSource      string         `json:"recorded_at_source,omitempty" gorm:"type:varchar(20)"` // metadata or file
 	FileHash              string         `json:"file_hash,omitempty" gorm:"type:varchar(64);index"`    // SHA-256 of the uploaded file
@@ -404,6 +405,12 @@ type MultiTrackFile struct {
 	// Relationships
 	TranscriptionJob TranscriptionJob `json:"transcription_job,omitempty" gorm:"foreignKey:TranscriptionJobID;constraint:OnDelete:CASCADE"`
 }
+
+// Automatic summary states shown while one is pending.
+const (
+	SummaryQueued  = "queued"  // waiting for the GPU
+	SummaryRunning = "running" // the model is writing it
+)
 
 // DuplicateRef points at another recording with the same file hash.
 type DuplicateRef struct {

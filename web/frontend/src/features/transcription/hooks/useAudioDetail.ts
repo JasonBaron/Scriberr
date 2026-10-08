@@ -69,6 +69,7 @@ export interface AudioFile {
     file_size?: number;
     original_filename?: string;
     duplicates?: { id: string; title: string; created_at: string }[];
+    summary_status?: string;
     recorded_at?: string;
     recorded_at_source?: string;
     parameters?: {
@@ -131,6 +132,10 @@ export function useAudioDetail(audioId: string) {
             const status = query.state.data?.status;
             if (status === "processing" || status === "pending") {
                 return 3000;
+            }
+            // An automatic summary is queued or running
+            if (query.state.data?.summary_status) {
+                return 5000;
             }
             return false;
         },

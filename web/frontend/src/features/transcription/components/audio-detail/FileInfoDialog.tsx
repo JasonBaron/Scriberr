@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -91,6 +92,7 @@ export function FileInfoDialog({ audioId, isOpen, onClose }: FileInfoDialogProps
     const { getAuthHeaders } = useAuth();
     const { toast } = useToast();
     const navigate = useNavigate();
+    const [showAllDups, setShowAllDups] = useState(false);
     const { data, isLoading, error } = useQuery({
         queryKey: ["fileInfo", audioId],
         queryFn: async () => {
@@ -137,7 +139,7 @@ export function FileInfoDialog({ audioId, isOpen, onClose }: FileInfoDialogProps
                                         Same file as {data.duplicates.length === 1 ? "another recording" : `${data.duplicates.length} other recordings`}
                                     </h3>
                                     <ul className="text-sm space-y-0.5">
-                                        {data.duplicates.map(d => (
+                                        {(showAllDups ? data.duplicates : data.duplicates.slice(0, 5)).map(d => (
                                             <li key={d.id}>
                                                 <button
                                                     type="button"
@@ -150,6 +152,15 @@ export function FileInfoDialog({ audioId, isOpen, onClose }: FileInfoDialogProps
                                             </li>
                                         ))}
                                     </ul>
+                                    {data.duplicates.length > 5 && (
+                                        <button
+                                            type="button"
+                                            className="mt-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--brand-solid)]"
+                                            onClick={() => setShowAllDups(!showAllDups)}
+                                        >
+                                            {showAllDups ? "Show fewer" : `Show all ${data.duplicates.length}`}
+                                        </button>
+                                    )}
                                 </section>
                             )}
 

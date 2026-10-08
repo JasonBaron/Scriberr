@@ -834,6 +834,12 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 											<h4 className="font-normal text-gray-900 dark:text-gray-100 truncate text-lg leading-tight group-hover:text-[#FF6D20] transition-colors">
 												{file.title || getFileName(file.audio_path)}
 											</h4>
+											{file.summary_status && (
+												<p className="mt-0.5 text-sm text-[#FF6D20] flex items-center gap-1.5">
+													<Loader2 className="h-3.5 w-3.5 animate-spin" />
+													{file.summary_status === "running" ? "Summarizing..." : "Summary queued"}
+												</p>
+											)}
 											{file.summary_brief && (
 												<p className="mt-0.5 text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
 													{file.summary_brief}

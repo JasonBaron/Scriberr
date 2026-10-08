@@ -26,6 +26,7 @@ export interface AudioFile {
     file_size?: number;
     original_filename?: string;
     duplicates?: { id: string; title: string; created_at: string }[];
+    summary_status?: string;
     recorded_at?: string;
     recorded_at_source?: string;
 }
@@ -114,7 +115,12 @@ export function useAudioListInfinite(params: Omit<AudioListParams, 'page'>) {
             return undefined;
         },
         initialPageParam: 1,
-        refetchInterval: false
+        // Poll while an automatic summary is pending so its title, brief and
+        // tags appear without a reload.
+        refetchInterval: (query) => {
+            const pending = query.state.data?.pages.some(p => p.jobs.some(j => j.summary_status));
+            return pending ? 5000 : false;
+        },
     });
 }
 

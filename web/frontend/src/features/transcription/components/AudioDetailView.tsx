@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useParams, useNavigate } from "react-router-dom";
 import { MoreVertical, Edit2, Activity, FileText, Bot, Check, Loader2, List, AlignLeft, ArrowDownCircle, StickyNote, MessageCircle, FileImage, FileJson, Clock, AlertCircle, Users, ClipboardCopy, FileAudio } from "lucide-react";
 import { Header } from "@/components/Header";
@@ -121,6 +122,18 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
             setNewTitle(audioFile.title || "");
         }
     }, [audioFile]);
+
+    // When an automatic summary finishes, load it into the summary panel
+    const queryClient = useQueryClient();
+    const prevSummaryStatus = useRef<string | undefined>(undefined);
+    useEffect(() => {
+        const status = audioFile?.summary_status || "";
+        if (prevSummaryStatus.current && !status && audioId) {
+            queryClient.invalidateQueries({ queryKey: ["summaries", audioId] });
+            queryClient.invalidateQueries({ queryKey: ["summary", audioId] });
+        }
+        prevSummaryStatus.current = status;
+    }, [audioFile?.summary_status, audioId, queryClient]);
 
     // Handlers
     const handleTimeUpdate = useCallback((time: number) => {
@@ -245,6 +258,15 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                             {/* Badges */}
                                             <div className="flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
                                                 <span>{formattedDate}</span>
+                                                {audioFile.summary_status && (
+                                                    <>
+                                                        <span className="w-1 h-1 rounded-full bg-[var(--text-tertiary)] opacity-50"></span>
+                                                        <span className="flex items-center gap-1 text-[var(--brand-solid)]">
+                                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                                            {audioFile.summary_status === "running" ? "Summarizing" : "Summary queued"}
+                                                        </span>
+                                                    </>
+                                                )}
                                                 {stageLabel && (audioFile.status === "processing" || audioFile.status === "pending") && (
                                                     <>
                                                         <span className="w-1 h-1 rounded-full bg-[var(--text-tertiary)] opacity-50"></span>

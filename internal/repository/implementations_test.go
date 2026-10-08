@@ -198,3 +198,23 @@ func TestFileHashLookups(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, missing)
 }
+
+func TestSummaryStatus(t *testing.T) {
+	_, db := newTestJobRepository(t)
+	require.NoError(t, db.AutoMigrate(&models.SummaryTemplate{}))
+	repo := NewSummaryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "1", AudioPath: "a.mp3"}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "2", AudioPath: "b.mp3"}).Error)
+
+	require.NoError(t, repo.SetSummaryStatus(ctx, "1", models.SummaryRunning))
+	var j models.TranscriptionJob
+	require.NoError(t, db.First(&j, "id = ?", "1").Error)
+	require.Equal(t, models.SummaryRunning, j.SummaryStatus)
+
+	n, err := repo.ClearSummaryStatuses(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n)
+	require.NoError(t, db.First(&j, "id = ?", "1").Error)
+	require.Empty(t, j.SummaryStatus)
+}
