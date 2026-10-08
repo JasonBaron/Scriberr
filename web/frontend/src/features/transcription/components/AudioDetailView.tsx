@@ -210,7 +210,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                             </div>
                             <div className="space-y-6 sm:space-y-8">
                                 {/* Sticky header: Title + Audio Player */}
-                                <div className="sticky top-0 z-10">
+                                <div className="sticky top-0 z-10 bg-[var(--bg-main)]">
                                     {/* Title & Metadata */}
                                     <div className="space-y-4 glass-card rounded-[var(--radius-card)] border-[var(--border-subtle)] shadow-[var(--shadow-card)] p-4 md:p-6 mb-4">
                                     <div className="flex items-start justify-between gap-4">

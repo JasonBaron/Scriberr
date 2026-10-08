@@ -31,12 +31,12 @@ export function SummaryPanel({ audioId, audioFile, onRegenerate }: SummaryPanelP
     const [selectedId, setSelectedId] = useState<string>("");
     const [expanded, setExpanded] = useState(true);
 
-    // Follow the newest summary unless the user picked another one
+    // Show the newest summary when the panel loads and whenever a new one
+    // arrives; the user can still switch to an older one in between.
+    const newestId = summaries[0]?.id ?? "";
     useEffect(() => {
-        if (summaries.length && !summaries.some(s => s.id === selectedId)) {
-            setSelectedId(summaries[0].id);
-        }
-    }, [summaries, selectedId]);
+        if (newestId) setSelectedId(newestId);
+    }, [newestId]);
 
     const selected = summaries.find(s => s.id === selectedId) || summaries[0];
     const suggestedTitle = audioFile.suggested_title?.trim();
