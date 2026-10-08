@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+	_ "time/tzdata" // embedded zone database so TZ works without tzdata in the image
 
 	"scriberr/internal/api"
 	"scriberr/internal/auth"
