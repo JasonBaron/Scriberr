@@ -180,6 +180,8 @@ func (p *PyAnnoteAdapter) GetMinSpeakers() int {
 
 // PrepareEnvironment sets up the dedicated PyAnnote environment
 func (p *PyAnnoteAdapter) PrepareEnvironment(ctx context.Context) error {
+	defer lockEnv(p.envPath)()
+
 	logger.Info("Preparing PyAnnote environment", "env_path", p.envPath)
 
 	// Always ensure diarization script exists

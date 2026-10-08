@@ -108,6 +108,8 @@ func (v *VoxtralAdapter) GetSupportedModels() []string {
 
 // PrepareEnvironment sets up the Voxtral environment
 func (v *VoxtralAdapter) PrepareEnvironment(ctx context.Context) error {
+	defer lockEnv(v.envPath)()
+
 	logger.Info("Preparing Voxtral environment", "env_path", v.envPath)
 
 	// Copy transcription script

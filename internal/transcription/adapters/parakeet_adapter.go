@@ -123,6 +123,8 @@ func (p *ParakeetAdapter) GetSupportedModels() []string {
 
 // PrepareEnvironment sets up the Parakeet environment
 func (p *ParakeetAdapter) PrepareEnvironment(ctx context.Context) error {
+	defer lockEnv(p.envPath)()
+
 	logger.Info("Preparing NVIDIA Parakeet environment", "env_path", p.envPath)
 
 	// Copy transcription scripts (standard and buffered)

@@ -150,6 +150,8 @@ func (s *SortformerAdapter) GetMinSpeakers() int {
 
 // PrepareEnvironment sets up the Sortformer environment (shared with NVIDIA models)
 func (s *SortformerAdapter) PrepareEnvironment(ctx context.Context) error {
+	defer lockEnv(s.envPath)()
+
 	logger.Info("Preparing NVIDIA Sortformer environment", "env_path", s.envPath)
 
 	// Copy diarization script
