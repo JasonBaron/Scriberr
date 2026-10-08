@@ -58,6 +58,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
     const [executionDialogOpen, setExecutionDialogOpen] = useState(false);
     const [logsDialogOpen, setLogsDialogOpen] = useState(false);
     const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
+    const [summaryStartNew, setSummaryStartNew] = useState(false);
 
     // Data Fetching
     const { data: audioFile, isLoading, error } = useAudioDetail(audioId || "");
@@ -368,7 +369,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                                             Rename Speakers
                                                         </DropdownMenuItem>
                                                     )}
-                                                    <DropdownMenuItem onClick={() => setSummaryDialogOpen(true)} className="rounded-[8px] cursor-pointer text-[var(--brand-solid)] focus:text-[var(--brand-solid)] focus:bg-[var(--brand-light)]">
+                                                    <DropdownMenuItem onClick={() => { setSummaryStartNew(false); setSummaryDialogOpen(true); }} className="rounded-[8px] cursor-pointer text-[var(--brand-solid)] focus:text-[var(--brand-solid)] focus:bg-[var(--brand-light)]">
                                                         <Bot className="mr-2 h-4 w-4" /> AI Summary
                                                     </DropdownMenuItem>
                                                     <DropdownMenuSeparator className="bg-[var(--border-subtle)] my-1" />
@@ -426,7 +427,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                 <SummaryPanel
                                     audioId={audioId}
                                     audioFile={audioFile}
-                                    onRegenerate={() => setSummaryDialogOpen(true)}
+                                    onRegenerate={() => { setSummaryStartNew(true); setSummaryDialogOpen(true); }}
                                 />
 
                                 {/* Transcript */}
@@ -503,6 +504,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                 isOpen={summaryDialogOpen}
                 onClose={setSummaryDialogOpen}
                 llmReady={true}
+                startNew={summaryStartNew}
             />
 
             {/* Mobile / Overlay Chat */}

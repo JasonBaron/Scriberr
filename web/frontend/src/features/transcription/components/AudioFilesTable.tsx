@@ -843,6 +843,28 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 													</>
 												)}
 											</div>
+											{file.suggested_tags && file.suggested_tags.length > 0 && (
+												<div className="flex flex-wrap gap-1 mt-1.5">
+													{file.suggested_tags.map(tag => (
+														<button
+															key={tag}
+															type="button"
+															title={globalFilter === tag ? "Clear tag filter" : `Show recordings tagged ${tag}`}
+															onClick={(e) => { e.stopPropagation(); setGlobalFilter(globalFilter === tag ? "" : tag); }}
+															onMouseDown={(e) => e.stopPropagation()}
+															onTouchStart={(e) => e.stopPropagation()}
+															className={cn(
+																"text-[11px] leading-none px-2 py-1 rounded-full border transition-colors",
+																globalFilter === tag
+																	? "border-[#FF6D20] text-[#FF6D20] bg-orange-50 dark:bg-orange-950"
+																	: "border-[var(--border-subtle)] text-gray-500 hover:border-[#FF6D20] hover:text-[#FF6D20]"
+															)}
+														>
+															{tag}
+														</button>
+													))}
+												</div>
+											)}
 											{(file.status === "processing" || file.status === "pending") && getDisplayProgress(file) !== undefined && (
 												<div className="mt-1.5 w-36 sm:w-44">
 													<div className="h-1.5 rounded-full bg-gray-200 dark:bg-zinc-700 overflow-hidden">

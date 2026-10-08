@@ -116,3 +116,17 @@ func TestSetDefaultTemplate(t *testing.T) {
 	require.False(t, gotA.IsDefault)
 	require.True(t, gotB.IsDefault)
 }
+
+func TestListWithParams_SearchesSuggestedTags(t *testing.T) {
+	repo, db := newTestJobRepository(t)
+	ctx := context.Background()
+
+	a, b := "Weekly sync", "Hiring plan"
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "1", Title: &a, AudioPath: "a.mp3", SuggestedTags: models.StringList{"budget", "q4"}}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "2", Title: &b, AudioPath: "b.mp3"}).Error)
+
+	jobs, count, err := repo.ListWithParams(ctx, 0, 10, "created_at", "desc", "budget", nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+	require.Equal(t, "1", jobs[0].ID)
+}

@@ -53,9 +53,11 @@ interface SummaryDialogProps {
     isOpen: boolean;
     onClose: (open: boolean) => void;
     llmReady: boolean | null;
+    // Open on the template selector instead of the stored summary
+    startNew?: boolean;
 }
 
-export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDialogProps) {
+export function SummaryDialog({ audioId, isOpen, onClose, llmReady, startNew = false }: SummaryDialogProps) {
     const { toast } = useToast();
     const { data: templates = [], isLoading: templatesLoading } = useSummaryTemplates();
     const { data: existingSummary, isLoading: summaryLoading } = useExistingSummary(audioId);
@@ -76,10 +78,10 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
     // Auto-show existing summary if available and not streaming
     // Wait for loading to complete to prevent blank display
     useEffect(() => {
-        if (isOpen && !summaryLoading && existingSummary?.content && !isStreaming && !streamContent) {
+        if (isOpen && !startNew && !summaryLoading && existingSummary?.content && !isStreaming && !streamContent) {
             setShowOutput(true);
         }
-    }, [isOpen, existingSummary, summaryLoading, isStreaming, streamContent]);
+    }, [isOpen, startNew, existingSummary, summaryLoading, isStreaming, streamContent]);
 
     // Preselect the default (or last used) template when the selector shows
     useEffect(() => {

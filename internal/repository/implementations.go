@@ -116,7 +116,7 @@ func (r *jobRepository) ListWithParams(ctx context.Context, offset, limit int, s
 	// Apply search filter
 	if searchQuery != "" {
 		search := "%" + searchQuery + "%"
-		db = db.Where("title LIKE ? OR audio_path LIKE ?", search, search)
+		db = db.Where("title LIKE ? OR audio_path LIKE ? OR suggested_tags LIKE ?", search, search, search)
 	}
 
 	// Count total matching records
