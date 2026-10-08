@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"scriberr/pkg/clock"
 )
 
 // Version is stamped at build time:
@@ -90,7 +92,7 @@ func (l *Log) Header(fields ...Field) {
 			b.WriteString(field(f.Key, f.Value))
 		}
 	}
-	b.WriteString(field("Started", l.start.Format("2006-01-02 15:04:05 MST")))
+	b.WriteString(field("Started", l.start.In(clock.Display).Format("2006-01-02 15:04:05 MST")))
 	b.WriteString(field("Version", Version))
 	b.WriteString(bar + "\n")
 	l.write(b.String())
