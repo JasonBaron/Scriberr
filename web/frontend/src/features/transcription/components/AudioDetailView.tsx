@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
-import { MoreVertical, Edit2, Activity, FileText, Bot, Check, Loader2, List, AlignLeft, ArrowDownCircle, StickyNote, MessageCircle, FileImage, FileJson, Clock, AlertCircle, Users, ClipboardCopy } from "lucide-react";
+import { MoreVertical, Edit2, Activity, FileText, Bot, Check, Loader2, List, AlignLeft, ArrowDownCircle, StickyNote, MessageCircle, FileImage, FileJson, Clock, AlertCircle, Users, ClipboardCopy, FileAudio } from "lucide-react";
 import { Header } from "@/components/Header";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import { LogsDialog } from "./audio-detail/LogsDialog";
 import { SummaryDialog } from "./audio-detail/SummaryDialog";
 import { SummaryPanel } from "./audio-detail/SummaryPanel";
 import { TagEditor } from "./audio-detail/TagEditor";
+import { FileInfoDialog } from "./audio-detail/FileInfoDialog";
 import { ChatSidePanel } from "./ChatSidePanel";
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -60,6 +61,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
     const [logsDialogOpen, setLogsDialogOpen] = useState(false);
     const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
     const [summaryStartNew, setSummaryStartNew] = useState(false);
+    const [fileInfoOpen, setFileInfoOpen] = useState(false);
 
     // Data Fetching
     const { data: audioFile, isLoading, error } = useAudioDetail(audioId || "");
@@ -405,6 +407,9 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                                         <FileJson className="mr-2 h-4 w-4 opacity-70" /> Download JSON
                                                     </DropdownMenuItem>
                                                     <DropdownMenuSeparator className="bg-[var(--border-subtle)] my-1" />
+                                                    <DropdownMenuItem onClick={() => setFileInfoOpen(true)} className="rounded-[8px] cursor-pointer">
+                                                        <FileAudio className="mr-2 h-4 w-4 opacity-70" /> File Info
+                                                    </DropdownMenuItem>
                                                     <DropdownMenuItem onClick={() => setExecutionDialogOpen(true)} className="rounded-[8px] cursor-pointer">
                                                         <Activity className="mr-2 h-4 w-4 opacity-70" /> Execution Info
                                                     </DropdownMenuItem>
@@ -503,6 +508,11 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                 audioId={audioId}
                 isOpen={logsDialogOpen}
                 onClose={setLogsDialogOpen}
+            />
+            <FileInfoDialog
+                audioId={audioId}
+                isOpen={fileInfoOpen}
+                onClose={setFileInfoOpen}
             />
             <SummaryDialog
                 audioId={audioId}

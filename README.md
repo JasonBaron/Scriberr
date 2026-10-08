@@ -79,12 +79,19 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | | Optional automatic summary after each transcription (Settings > Summary), using the default template; waits for the GPU with a local model |
 | | Recorded date read from file metadata (QuickTime/MP4 `creation_time`, WAV/BWF dates), else the file's modified time; used in the list, the job page and suggested titles |
 
+### In progress (fork-features-2)
+
+| Change |
+|---|
+| SHA-256 of every upload stored; uploading a file that is already in Scriberr warns and names the earlier recording. Existing recordings are hashed in the background on first start |
+| File Info in the job menu: original name, format, codec, duration, sample rate, channels, bit rate, recorded and upload dates, SHA-256 with links to recordings of the same file, and every embedded tag |
+
 ### Next
 
 | Item | Notes |
 |---|---|
 | fork-fixes-5: YouTube | Transcripts do not appear after adding a video; Shorts links are not accepted |
-| fork-features-2: recordings as units | Per-recording folders, duplicate upload detection, zip export |
+| fork-features-2: recordings as units | Per-recording folders, zip export |
 | fork-features-3: speakers and tags | Speaker ranges per profile, speaker names in summaries, real tags (from the suggestions) with filtering, template chosen by tag or profile |
 | Progress and ETA | Per-model estimates from measured real-time factors |
 | Metrics | Processing time, model and RTF per job in the UI |

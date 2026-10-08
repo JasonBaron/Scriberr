@@ -277,7 +277,7 @@ func (h *Handler) UploadAudio(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
 		return
 	}
-	recordedAt, recordedAtSource := recordedAtForUpload(c, filePath)
+	upload := inspectUpload(c, filePath, header.Filename)
 
 	// Check if file is .webm and convert to MP3
 	// WebM files from browser MediaRecorder often lack proper duration metadata,
@@ -311,11 +311,9 @@ func (h *Handler) UploadAudio(c *gin.Context) {
 	jobID = jobID[:len(jobID)-len(filepath.Ext(jobID))] // Extract ID from filename
 
 	job := models.TranscriptionJob{
-		ID:               jobID,
-		AudioPath:        filePath,
-		Status:           models.StatusUploaded,
-		RecordedAt:       recordedAt,
-		RecordedAtSource: recordedAtSource,
+		ID:        jobID,
+		AudioPath: filePath,
+		Status:    models.StatusUploaded,
 	}
 
 	if title := c.PostForm(paramTitle); title != "" {
@@ -323,6 +321,7 @@ func (h *Handler) UploadAudio(c *gin.Context) {
 	}
 
 	// Save to database using Repository
+	h.applyUpload(c.Request.Context(), &job, upload)
 	if err := h.jobRepo.Create(c.Request.Context(), &job); err != nil {
 		_ = h.fileService.RemoveFile(filePath) // Clean up file
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job"})
@@ -404,7 +403,7 @@ func (h *Handler) UploadVideo(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
 		return
 	}
-	recordedAt, recordedAtSource := recordedAtForUpload(c, videoPath)
+	upload := inspectUpload(c, videoPath, header.Filename)
 
 	// Generate job ID from filename
 	jobID := filepath.Base(videoPath)
@@ -421,11 +420,9 @@ func (h *Handler) UploadVideo(c *gin.Context) {
 
 	// Create job record
 	job := models.TranscriptionJob{
-		ID:               jobID,
-		AudioPath:        audioPath, // Use the extracted audio path
-		Status:           models.StatusUploaded,
-		RecordedAt:       recordedAt,
-		RecordedAtSource: recordedAtSource,
+		ID:        jobID,
+		AudioPath: audioPath, // Use the extracted audio path
+		Status:    models.StatusUploaded,
 	}
 
 	if title := c.PostForm(paramTitle); title != "" {
@@ -433,6 +430,7 @@ func (h *Handler) UploadVideo(c *gin.Context) {
 	}
 
 	// Save to database
+	h.applyUpload(c.Request.Context(), &job, upload)
 	if err := h.jobRepo.Create(c.Request.Context(), &job); err != nil {
 		_ = h.fileService.RemoveFile(videoPath)
 		_ = h.fileService.RemoveFile(audioPath)
@@ -725,7 +723,7 @@ func (h *Handler) SubmitJob(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
 		return
 	}
-	recordedAt, recordedAtSource := recordedAtForUpload(c, filePath)
+	upload := inspectUpload(c, filePath, header.Filename)
 
 	// Generate job ID from filename
 	jobID := filepath.Base(filePath)
@@ -779,13 +777,11 @@ func (h *Handler) SubmitJob(c *gin.Context) {
 
 	// Create job
 	job := models.TranscriptionJob{
-		ID:               jobID,
-		AudioPath:        filePath,
-		Status:           models.StatusPending,
-		Diarization:      diarize,
-		Parameters:       params,
-		RecordedAt:       recordedAt,
-		RecordedAtSource: recordedAtSource,
+		ID:          jobID,
+		AudioPath:   filePath,
+		Status:      models.StatusPending,
+		Diarization: diarize,
+		Parameters:  params,
 	}
 
 	if title := c.PostForm(paramTitle); title != "" {
@@ -793,6 +789,7 @@ func (h *Handler) SubmitJob(c *gin.Context) {
 	}
 
 	// Save to database
+	h.applyUpload(c.Request.Context(), &job, upload)
 	if err := h.jobRepo.Create(c.Request.Context(), &job); err != nil {
 		_ = h.fileService.RemoveFile(filePath)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job"})

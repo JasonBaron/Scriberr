@@ -173,3 +173,28 @@ func TestSetRecordedAt(t *testing.T) {
 	require.True(t, got.RecordedAt.Equal(when))
 	require.Equal(t, "metadata", got.RecordedAtSource)
 }
+
+func TestFileHashLookups(t *testing.T) {
+	repo, db := newTestJobRepository(t)
+	ctx := context.Background()
+	a := "First"
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "1", Title: &a, AudioPath: "a.m4a", FileHash: "abc"}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "2", AudioPath: "b.m4a", FileHash: "abc"}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "3", AudioPath: "c.m4a"}).Error)
+
+	dups, err := repo.FindByFileHash(ctx, "abc", "2")
+	require.NoError(t, err)
+	require.Len(t, dups, 1)
+	require.Equal(t, "1", dups[0].ID)
+	require.Equal(t, "First", *dups[0].Title)
+
+	missing, err := repo.ListMissingFileHash(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, missing, 1)
+	require.Equal(t, "3", missing[0].ID)
+
+	require.NoError(t, repo.SetFileHash(ctx, "3", "def", 42))
+	missing, err = repo.ListMissingFileHash(ctx, 10)
+	require.NoError(t, err)
+	require.Empty(t, missing)
+}

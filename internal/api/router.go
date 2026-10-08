@@ -147,6 +147,7 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 			transcription.GET("/:id/summary", handler.GetSummaryForTranscription)
 			transcription.GET("/:id/summaries", handler.ListSummariesForTranscription)
 			transcription.PUT("/:id/tags", handler.UpdateTranscriptionTags)
+			transcription.GET("/:id/file-info", handler.GetFileInfo)
 			transcription.GET("/:id", handler.GetTranscriptionJob)
 			transcription.DELETE("/:id", handler.DeleteTranscriptionJob)
 			transcription.GET("/list", handler.ListTranscriptionJobs)

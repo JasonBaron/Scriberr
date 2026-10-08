@@ -77,6 +77,9 @@ type JobRepository interface {
 	UpdateStatus(ctx context.Context, jobID string, status models.JobStatus) error
 	UpdateError(ctx context.Context, jobID string, errorMsg string) error
 	SetRecordedAt(ctx context.Context, jobID string, recordedAt time.Time, source string) error
+	SetFileHash(ctx context.Context, jobID, hash string, size int64) error
+	FindByFileHash(ctx context.Context, hash, excludeID string) ([]models.TranscriptionJob, error)
+	ListMissingFileHash(ctx context.Context, limit int) ([]models.TranscriptionJob, error)
 	FindByStatus(ctx context.Context, status models.JobStatus) ([]models.TranscriptionJob, error)
 	CountByStatus(ctx context.Context, status models.JobStatus) (int64, error)
 	UpdateSummary(ctx context.Context, jobID string, summary string) error
@@ -218,6 +221,33 @@ func (r *jobRepository) UpdateStatus(ctx context.Context, jobID string, status m
 
 func (r *jobRepository) UpdateError(ctx context.Context, jobID string, errorMsg string) error {
 	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).Update("error_message", errorMsg).Error
+}
+
+// SetFileHash stores the SHA-256 and size of a job's uploaded file.
+func (r *jobRepository) SetFileHash(ctx context.Context, jobID, hash string, size int64) error {
+	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).
+		Updates(map[string]interface{}{"file_hash": hash, "file_size": size}).Error
+}
+
+// FindByFileHash returns other jobs whose uploaded file has this hash,
+// oldest first.
+func (r *jobRepository) FindByFileHash(ctx context.Context, hash, excludeID string) ([]models.TranscriptionJob, error) {
+	var jobs []models.TranscriptionJob
+	if hash == "" {
+		return jobs, nil
+	}
+	err := r.db.WithContext(ctx).Select("id", "title", "audio_path", "created_at").
+		Where("file_hash = ? AND id <> ?", hash, excludeID).Order("created_at ASC").Find(&jobs).Error
+	return jobs, err
+}
+
+// ListMissingFileHash returns jobs that have no file hash yet.
+func (r *jobRepository) ListMissingFileHash(ctx context.Context, limit int) ([]models.TranscriptionJob, error) {
+	var jobs []models.TranscriptionJob
+	err := r.db.WithContext(ctx).Select("id", "audio_path").
+		Where("(file_hash IS NULL OR file_hash = '') AND is_multi_track = ?", false).
+		Order("created_at ASC").Limit(limit).Find(&jobs).Error
+	return jobs, err
 }
 
 // SetRecordedAt stores when the audio was recorded and where that came from.

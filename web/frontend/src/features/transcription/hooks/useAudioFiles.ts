@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useToast } from '@/components/ui/toast';
 
 export interface AudioFile {
     id: string;
@@ -21,6 +22,10 @@ export interface AudioFile {
     tags?: string[];
     tags_edited?: boolean;
     summary_brief?: string;
+    file_hash?: string;
+    file_size?: number;
+    original_filename?: string;
+    duplicates?: { id: string; title: string; created_at: string }[];
     recorded_at?: string;
     recorded_at_source?: string;
 }
@@ -116,6 +121,7 @@ export function useAudioListInfinite(params: Omit<AudioListParams, 'page'>) {
 export function useAudioUpload() {
     const { getAuthHeaders } = useAuth();
     const queryClient = useQueryClient();
+    const { toast } = useToast();
 
     return useMutation({
         mutationFn: async ({ file, isVideo }: { file: File, isVideo: boolean }) => {
@@ -137,10 +143,18 @@ export function useAudioUpload() {
             if (!response.ok) {
                 throw new Error('Upload failed');
             }
-            return response.json();
+            return response.json() as Promise<AudioFile>;
         },
-        onSuccess: () => {
+        onSuccess: (job: AudioFile) => {
             queryClient.invalidateQueries({ queryKey: ['audioFiles'] });
+            const dup = job?.duplicates?.[0];
+            if (dup) {
+                const more = job.duplicates!.length > 1 ? ` and ${job.duplicates!.length - 1} more` : '';
+                toast({
+                    title: 'This file was already uploaded',
+                    description: `Same file as "${dup.title || dup.id}" (${new Date(dup.created_at).toLocaleDateString()})${more}. File Info on either recording shows the match.`,
+                });
+            }
         },
     });
 }

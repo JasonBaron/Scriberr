@@ -686,6 +686,61 @@ func (suite *APIHandlerTestSuite) TestTranscriptionSubmit() {
 	assert.Equal(suite.T(), models.StatusPending, response.Status)
 }
 
+// uploadBytes posts data to /transcription/upload and returns the job.
+func (suite *APIHandlerTestSuite) uploadBytes(name string, data []byte) models.TranscriptionJob {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("audio", name)
+	assert.NoError(suite.T(), err)
+	_, _ = part.Write(data)
+	_ = writer.WriteField("title", name)
+	writer.Close()
+
+	req, _ := http.NewRequest("POST", "/api/v1/transcription/upload", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-API-Key", suite.helper.TestAPIKey)
+	w := httptest.NewRecorder()
+	suite.router.ServeHTTP(w, req)
+	assert.Equal(suite.T(), 200, w.Code, w.Body.String())
+
+	var job models.TranscriptionJob
+	assert.NoError(suite.T(), json.Unmarshal(w.Body.Bytes(), &job))
+	return job
+}
+
+// Test that uploads are hashed and repeat uploads are flagged
+func (suite *APIHandlerTestSuite) TestUploadDuplicateDetection() {
+	data := []byte("same audio bytes for duplicate detection")
+	first := suite.uploadBytes("memo.m4a", data)
+	assert.Len(suite.T(), first.FileHash, 64)
+	assert.Equal(suite.T(), int64(len(data)), first.FileSize)
+	assert.Equal(suite.T(), "memo.m4a", first.OriginalFilename)
+	assert.Empty(suite.T(), first.Duplicates)
+
+	second := suite.uploadBytes("memo copy.m4a", data)
+	assert.Equal(suite.T(), first.FileHash, second.FileHash)
+	if assert.Len(suite.T(), second.Duplicates, 1) {
+		assert.Equal(suite.T(), first.ID, second.Duplicates[0].ID)
+	}
+
+	other := suite.uploadBytes("other.m4a", []byte("different bytes"))
+	assert.Empty(suite.T(), other.Duplicates)
+
+	w := suite.makeAuthenticatedRequest("GET", fmt.Sprintf("/api/v1/transcription/%s/file-info", first.ID), nil, false)
+	assert.Equal(suite.T(), 200, w.Code)
+	var info api.FileInfoResponse
+	assert.NoError(suite.T(), json.Unmarshal(w.Body.Bytes(), &info))
+	assert.Equal(suite.T(), first.FileHash, info.SHA256)
+	assert.Equal(suite.T(), "memo.m4a", info.OriginalFilename)
+	assert.True(suite.T(), info.FileExists)
+	if assert.Len(suite.T(), info.Duplicates, 1) {
+		assert.Equal(suite.T(), second.ID, info.Duplicates[0].ID)
+	}
+
+	w = suite.makeAuthenticatedRequest("GET", "/api/v1/transcription/missing/file-info", nil, false)
+	assert.Equal(suite.T(), 404, w.Code)
+}
+
 // Test error responses for non-existent resources
 func (suite *APIHandlerTestSuite) TestNotFoundErrors() {
 	endpoints := []string{
