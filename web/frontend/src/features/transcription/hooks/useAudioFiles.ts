@@ -115,11 +115,14 @@ export function useAudioListInfinite(params: Omit<AudioListParams, 'page'>) {
             return undefined;
         },
         initialPageParam: 1,
-        // Poll while an automatic summary is pending so its title, brief and
-        // tags appear without a reload.
+        // Poll while a job is queued or processing, or an automatic summary
+        // is pending, so status, title, brief and tags update without a
+        // reload. Live events speed this up but can be missed (for example
+        // after a page refresh mid-job).
         refetchInterval: (query) => {
-            const pending = query.state.data?.pages.some(p => p.jobs.some(j => j.summary_status));
-            return pending ? 5000 : false;
+            const busy = query.state.data?.pages.some(p => p.jobs.some(j =>
+                j.summary_status || j.status === 'processing' || j.status === 'pending'));
+            return busy ? 5000 : false;
         },
     });
 }
