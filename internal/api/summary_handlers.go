@@ -33,12 +33,19 @@ func applyTemplateFlags(item *models.SummaryTemplate, req SummaryTemplateRequest
 	}
 }
 
+// SummarySettingsRequest updates the fields that are set and keeps the rest.
 type SummarySettingsRequest struct {
-	DefaultModel string `json:"default_model" binding:"required,min=1"`
+	DefaultModel  *string `json:"default_model"`
+	AutoSummarize *bool   `json:"auto_summarize"`
 }
 
 type SummarySettingsResponse struct {
-	DefaultModel string `json:"default_model"`
+	DefaultModel  string `json:"default_model"`
+	AutoSummarize bool   `json:"auto_summarize"`
+}
+
+func settingsResponse(s *models.SummarySetting) SummarySettingsResponse {
+	return SummarySettingsResponse{DefaultModel: s.DefaultModel, AutoSummarize: s.AutoSummarize}
 }
 
 // ListSummaryTemplates returns all templates
@@ -211,7 +218,7 @@ func (h *Handler) GetSummarySettings(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch settings"})
 		return
 	}
-	c.JSON(http.StatusOK, SummarySettingsResponse{DefaultModel: s.DefaultModel})
+	c.JSON(http.StatusOK, settingsResponse(s))
 }
 
 // SaveSummarySettings updates default model (creates row if absent)
@@ -234,35 +241,22 @@ func (h *Handler) SaveSummarySettings(c *gin.Context) {
 	}
 	s, err := h.summaryRepo.GetSettings(c.Request.Context())
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			s = &models.SummarySetting{
-				DefaultModel: req.DefaultModel,
-				UpdatedAt:    time.Now(),
-			}
-			// We can't use Create from BaseRepository because it expects *T, but GetSettings returns *T.
-			// BaseRepository.Create expects *T.
-			// Actually BaseRepository[T] Create takes *T.
-			// But here T is models.SummaryTemplate, NOT models.SummarySetting.
-			// SummaryRepository handles SummaryTemplate.
-			// But GetSettings returns SummarySetting.
-			// So I can't use h.summaryRepo.Create(s) because s is SummarySetting, not SummaryTemplate.
-			// I need to add SaveSettings to SummaryRepository which handles creation too.
-			// I added SaveSettings(ctx, settings).
-			if err := h.summaryRepo.SaveSettings(c.Request.Context(), s); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save settings"})
-				return
-			}
-			c.JSON(http.StatusOK, SummarySettingsResponse{DefaultModel: s.DefaultModel})
+		if err != gorm.ErrRecordNotFound {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save settings"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save settings"})
-		return
+		s = &models.SummarySetting{}
 	}
-	s.DefaultModel = req.DefaultModel
+	if req.DefaultModel != nil {
+		s.DefaultModel = *req.DefaultModel
+	}
+	if req.AutoSummarize != nil {
+		s.AutoSummarize = *req.AutoSummarize
+	}
 	s.UpdatedAt = time.Now()
 	if err := h.summaryRepo.SaveSettings(c.Request.Context(), s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save settings"})
 		return
 	}
-	c.JSON(http.StatusOK, SummarySettingsResponse{DefaultModel: s.DefaultModel})
+	c.JSON(http.StatusOK, settingsResponse(s))
 }

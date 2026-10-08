@@ -65,21 +65,48 @@ func TestSaveSuggestions(t *testing.T) {
 	transcript := "hello"
 	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "1", Title: &keep, AudioPath: "a.mp3", Transcript: &transcript}).Error)
 	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "2", AudioPath: "b.mp3"}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "3", AudioPath: "c.mp3", Tags: models.StringList{"mine"}, TagsEdited: true}).Error)
 
-	require.NoError(t, repo.SaveSuggestions(ctx, "1", "2026-10-08 Budget review", models.StringList{"budget", "q4"}, false))
-	require.NoError(t, repo.SaveSuggestions(ctx, "2", "2026-10-08 Hiring plan", models.StringList{"hiring"}, true))
+	require.NoError(t, repo.SaveSuggestions(ctx, "1", models.JobSuggestion{Title: "2026-10-08 Budget review", Brief: "Q4 budget walkthrough.", Tags: models.StringList{"budget", "q4"}}, false))
+	require.NoError(t, repo.SaveSuggestions(ctx, "2", models.JobSuggestion{Title: "2026-10-08 Hiring plan", Tags: models.StringList{"hiring"}}, true))
+	require.NoError(t, repo.SaveSuggestions(ctx, "3", models.JobSuggestion{Title: "x", Tags: models.StringList{"generated"}}, false))
 
-	var j1, j2 models.TranscriptionJob
+	var j1, j2, j3 models.TranscriptionJob
 	require.NoError(t, db.First(&j1, "id = ?", "1").Error)
 	require.NoError(t, db.First(&j2, "id = ?", "2").Error)
+	require.NoError(t, db.First(&j3, "id = ?", "3").Error)
 
 	require.Equal(t, "Weekly sync", *j1.Title, "a real title is kept")
 	require.Equal(t, "2026-10-08 Budget review", *j1.SuggestedTitle)
-	require.Equal(t, models.StringList{"budget", "q4"}, j1.SuggestedTags)
+	require.Equal(t, "Q4 budget walkthrough.", *j1.SummaryBrief)
+	require.Equal(t, models.StringList{"budget", "q4"}, j1.Tags, "generated tags become the tags")
 	require.Equal(t, "hello", *j1.Transcript, "other columns are untouched")
 
 	require.Equal(t, "2026-10-08 Hiring plan", *j2.Title, "a placeholder title is replaced")
-	require.Equal(t, models.StringList{"hiring"}, j2.SuggestedTags)
+	require.Equal(t, models.StringList{"mine"}, j3.Tags, "edited tags are kept")
+	require.Equal(t, models.StringList{"generated"}, j3.SuggestedTags)
+}
+
+func TestSetTagsAndTagCounts(t *testing.T) {
+	_, db := newTestJobRepository(t)
+	require.NoError(t, db.AutoMigrate(&models.SummaryTemplate{}))
+	repo := NewSummaryRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "1", AudioPath: "a.mp3", Tags: models.StringList{"family", "budget"}}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "2", AudioPath: "b.mp3", Tags: models.StringList{"family"}}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "3", AudioPath: "c.mp3"}).Error)
+
+	require.NoError(t, repo.SetTags(ctx, "3", models.StringList{"family", "work"}))
+	require.ErrorIs(t, repo.SetTags(ctx, "missing", models.StringList{"x"}), gorm.ErrRecordNotFound)
+
+	var j3 models.TranscriptionJob
+	require.NoError(t, db.First(&j3, "id = ?", "3").Error)
+	require.True(t, j3.TagsEdited)
+
+	counts, err := repo.TagCounts(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []TagCount{{"family", 3}, {"budget", 1}, {"work", 1}}, counts)
 }
 
 func TestListSummaries(t *testing.T) {
@@ -118,12 +145,12 @@ func TestSetDefaultTemplate(t *testing.T) {
 	require.True(t, gotB.IsDefault)
 }
 
-func TestListWithParams_SearchesSuggestedTags(t *testing.T) {
+func TestListWithParams_SearchesTags(t *testing.T) {
 	repo, db := newTestJobRepository(t)
 	ctx := context.Background()
 
 	a, b := "Weekly sync", "Hiring plan"
-	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "1", Title: &a, AudioPath: "a.mp3", SuggestedTags: models.StringList{"budget", "q4"}}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "1", Title: &a, AudioPath: "a.mp3", Tags: models.StringList{"budget", "q4"}}).Error)
 	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "2", Title: &b, AudioPath: "b.mp3"}).Error)
 
 	jobs, count, err := repo.ListWithParams(ctx, 0, 10, "created_at", "desc", "budget", nil)

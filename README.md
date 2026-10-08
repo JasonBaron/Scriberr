@@ -73,7 +73,10 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | | Working title (`{date} {topic}`) and up to 5 tags suggested after each summary; the title is applied automatically over placeholder names |
 | | Per-template Reasoning switch (thinking off by default) and a default template preselected in the Summarize dialog |
 | | Summary shown on the job page with copy, .md/.txt download and a switcher for multiple summaries |
-| | Tags shown in the recordings list (click to filter) and matched by search |
+| | Tags shown in the recordings list (click to filter) and matched by search; editable on the job page with suggestions from tags already in use |
+| | Generated tags standardized: the model is given the existing tag list to reuse, and case, spacing and singular/plural variants are folded into existing tags |
+| | One-sentence brief per recording, shown in the list |
+| | Optional automatic summary after each transcription (Settings > Summary), using the default template; waits for the GPU with a local model |
 | | Recorded date read from file metadata (QuickTime/MP4 `creation_time`, WAV/BWF dates), else the file's modified time; used in the list, the job page and suggested titles |
 
 ### Next
@@ -83,7 +86,6 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | fork-fixes-5: YouTube | Transcripts do not appear after adding a video; Shorts links are not accepted |
 | fork-features-2: recordings as units | Per-recording folders, duplicate upload detection, zip export |
 | fork-features-3: speakers and tags | Speaker ranges per profile, speaker names in summaries, real tags (from the suggestions) with filtering, template chosen by tag or profile |
-| Auto-summary | Summary on completion, through a local Ollama model |
 | Progress and ETA | Per-model estimates from measured real-time factors |
 | Metrics | Processing time, model and RTF per job in the UI |
 | Transcript search | Search inside transcript text, not only titles |

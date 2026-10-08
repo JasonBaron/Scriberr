@@ -62,6 +62,9 @@ export interface AudioFile {
     merge_error?: string;
     suggested_title?: string;
     suggested_tags?: string[];
+    tags?: string[];
+    tags_edited?: boolean;
+    summary_brief?: string;
     recorded_at?: string;
     recorded_at_source?: string;
     parameters?: {

@@ -80,6 +80,12 @@ func Initialize(dbPath string) error {
 		return fmt.Errorf("failed to auto migrate: %v", err)
 	}
 
+	// Tags were stored only as suggestions before user-editable tags existed;
+	// carry those over once. Rows whose tags were edited are left alone.
+	if err := DB.Exec("UPDATE transcription_jobs SET tags = suggested_tags WHERE tags IS NULL AND suggested_tags IS NOT NULL AND (tags_edited IS NULL OR tags_edited = 0)").Error; err != nil {
+		fmt.Printf("Warning: Failed to copy suggested tags: %v\n", err)
+	}
+
 	// Cleanup duplicate speaker mappings before creating unique index (for backward compatibility)
 	// Keep the latest mapping for each (job_id, original_speaker) pair
 	cleanupQuery := `

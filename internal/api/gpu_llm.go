@@ -82,9 +82,11 @@ func (h *Handler) UnloadLocalLLM(ctx context.Context) string {
 }
 
 // afterSummary runs in the background once a summary stream has closed,
-// while the model is still loaded and the GPU lock is held. It asks the same model for a working
-// title and tags, stores them as suggestions, and applies the title when the
-// current one is a placeholder (a file name, "New Recording", empty).
+// while the model is still loaded and the GPU lock is held. It asks the same
+// model for a working title, a one-sentence brief and tags. Tags are steered
+// toward ones already in use. The title is applied when the current one is a
+// placeholder (a file name, "New Recording", empty); the tags are applied
+// unless the user has edited them.
 func (h *Handler) afterSummary(ctx context.Context, req SummarizeRequest, svc llm.Service, summary string, completed bool) {
 	if !envEnabled(titles.EnvSuggest) {
 		return
@@ -99,31 +101,46 @@ func (h *Handler) afterSummary(ctx context.Context, req SummarizeRequest, svc ll
 		return
 	}
 
+	vocabulary := h.tagVocabulary(ctx)
+
 	// Short, deterministic call. Thinking is off regardless of the template:
 	// a title does not benefit from it and it would only add latency.
 	tctx, cancel := context.WithTimeout(llm.WithThinking(context.Background(), false), 90*time.Second)
 	defer cancel()
-	resp, err := svc.ChatCompletion(tctx, req.Model, []llm.ChatMessage{{Role: "user", Content: titles.Prompt(summary)}}, 0.2)
+	resp, err := svc.ChatCompletion(tctx, req.Model, []llm.ChatMessage{{Role: "user", Content: titles.Prompt(summary, vocabulary)}}, 0.2)
 	if err != nil || resp == nil || len(resp.Choices) == 0 {
 		logger.Warn("Title suggestion failed", "job_id", job.ID, "model", req.Model, "error", err)
 		return
 	}
-	topic, tags, err := titles.ParseSuggestion(resp.Choices[0].Message.Content)
+	sug, err := titles.Parse(resp.Choices[0].Message.Content, vocabulary)
 	if err != nil {
 		logger.Warn("Title suggestion unusable", "job_id", job.ID, "model", req.Model, "error", err)
 		return
 	}
 
 	h.ensureRecordedAt(ctx, job)
-	title := titles.Format(titles.Pattern(), jobDate(job).In(clock.Display), topic)
+	title := titles.Format(titles.Pattern(), jobDate(job).In(clock.Display), sug.Topic)
 	current := ""
 	if job.Title != nil {
 		current = *job.Title
 	}
 	apply := titles.IsPlaceholder(current, job.AudioPath)
-	if err := h.summaryRepo.SaveSuggestions(ctx, job.ID, title, models.StringList(tags), apply); err != nil {
+	if err := h.summaryRepo.SaveSuggestions(ctx, job.ID, models.JobSuggestion{Title: title, Brief: sug.Brief, Tags: models.StringList(sug.Tags)}, apply); err != nil {
 		logger.Warn("Could not save title suggestion", "job_id", job.ID, "error", err)
 		return
 	}
-	logger.Info("Saved title suggestion", "job_id", job.ID, "title", title, "tags", strings.Join(tags, ","), "applied", apply)
+	logger.Info("Saved title suggestion", "job_id", job.ID, "title", title, "tags", strings.Join(sug.Tags, ","), "applied", apply)
+}
+
+// tagVocabulary returns the tags in use, most used first.
+func (h *Handler) tagVocabulary(ctx context.Context) []string {
+	counts, err := h.summaryRepo.TagCounts(ctx)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(counts))
+	for _, c := range counts {
+		out = append(out, c.Tag)
+	}
+	return out
 }

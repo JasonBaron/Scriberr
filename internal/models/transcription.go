@@ -18,6 +18,9 @@ type TranscriptionJob struct {
 	Summary               *string        `json:"summary,omitempty" gorm:"type:text"`
 	SuggestedTitle        *string        `json:"suggested_title,omitempty" gorm:"type:text"`
 	SuggestedTags         StringList     `json:"suggested_tags,omitempty" gorm:"type:text"`
+	Tags                  StringList     `json:"tags,omitempty" gorm:"type:text"`                      // shown and searchable; generated until edited by hand
+	TagsEdited            bool           `json:"tags_edited" gorm:"default:false"`                     // true once the user changed the tags
+	SummaryBrief          *string        `json:"summary_brief,omitempty" gorm:"type:text"`             // one-sentence summary for the list
 	RecordedAt            *time.Time     `json:"recorded_at,omitempty"`                                // from file metadata or the file's modified time; nil if unknown
 	RecordedAtSource      string         `json:"recorded_at_source,omitempty" gorm:"type:varchar(20)"` // metadata or file
 	ErrorMessage          *string        `json:"error_message,omitempty" gorm:"type:text"`

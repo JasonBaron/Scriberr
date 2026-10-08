@@ -34,9 +34,11 @@ func (st *SummaryTemplate) BeforeCreate(tx *gorm.DB) error {
 
 // SummarySetting stores global settings for summarization (single row)
 type SummarySetting struct {
-	ID           uint      `json:"id" gorm:"primaryKey"`
-	DefaultModel string    `json:"default_model" gorm:"type:varchar(255);not null;default:''"`
-	UpdatedAt    time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	ID           uint   `json:"id" gorm:"primaryKey"`
+	DefaultModel string `json:"default_model" gorm:"type:varchar(255);not null;default:''"`
+	// AutoSummarize runs the default template on every completed transcription.
+	AutoSummarize bool      `json:"auto_summarize" gorm:"default:false"`
+	UpdatedAt     time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 // Summary stores a generated summary linked to a transcription
@@ -59,4 +61,11 @@ func (s *Summary) BeforeCreate(tx *gorm.DB) error {
 		s.ID = uuid.New().String()
 	}
 	return nil
+}
+
+// JobSuggestion is what the model proposed for a job after a summary.
+type JobSuggestion struct {
+	Title string
+	Brief string
+	Tags  StringList
 }

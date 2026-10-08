@@ -77,44 +77,73 @@ func IsPlaceholder(title, audioPath string) bool {
 	return false
 }
 
-// Prompt asks for a topic and tags as JSON, based on the summary.
-func Prompt(summary string) string {
-	return `Read this summary of a recording and return JSON only, no other text:
-{"topic": "...", "tags": ["...", "..."]}
+// maxVocabulary caps how many existing tags are offered to the model.
+const maxVocabulary = 60
+
+// Prompt asks for a topic, a one-sentence brief and tags as JSON, based on
+// the summary. vocabulary lists tags already in use, most used first; the
+// model is told to reuse them so tags stay consistent across recordings.
+func Prompt(summary string, vocabulary []string) string {
+	var b strings.Builder
+	b.WriteString(`Read this summary of a recording and return JSON only, no other text:
+{"topic": "...", "brief": "...", "tags": ["...", "..."]}
 
 topic: 4 to 8 words naming what the recording is specifically about. Title Case. No date, no quotes, no trailing punctuation. Avoid generic words like Recording, Conversation, Discussion, Meeting, Summary.
-tags: 3 to 5 short lowercase tags (1 to 3 words each) for filing and search, most specific first.
+brief: one plain sentence of at most 25 words saying what the recording covers, for a list view.
+tags: 3 to 5 short lowercase tags (1 to 2 words each, singular nouns) for filing and search, most specific first.
+`)
+	if len(vocabulary) > maxVocabulary {
+		vocabulary = vocabulary[:maxVocabulary]
+	}
+	if len(vocabulary) > 0 {
+		b.WriteString("Existing tags: reuse these, spelled exactly as shown, whenever one fits. Add a new tag only when none fits.\n")
+		b.WriteString(strings.Join(vocabulary, ", "))
+		b.WriteString("\n")
+	}
+	b.WriteString("\nSummary:\n")
+	b.WriteString(summary)
+	return b.String()
+}
 
-Summary:
-` + summary
+// Suggestion is what the model proposed for a recording.
+type Suggestion struct {
+	Topic string
+	Brief string
+	Tags  []string
 }
 
 var jsonObjRe = regexp.MustCompile(`(?s)\{.*\}`)
 
-// ParseSuggestion extracts and cleans the topic and tags from a model reply.
-// It tolerates code fences, leading text and thinking blocks around the JSON.
-func ParseSuggestion(raw string) (topic string, tags []string, err error) {
+// Parse extracts and cleans the suggestion from a model reply. It tolerates
+// code fences, leading text and thinking blocks around the JSON. Tags are
+// standardized against vocabulary (see Standardize).
+func Parse(raw string, vocabulary []string) (Suggestion, error) {
 	raw = stripThinking(raw)
 	m := jsonObjRe.FindString(raw)
 	if m == "" {
-		return "", nil, errors.New("no JSON object in reply")
+		return Suggestion{}, errors.New("no JSON object in reply")
 	}
 	var v struct {
-		Topic string   `json:"topic"`
-		Title string   `json:"title"`
-		Tags  []string `json:"tags"`
+		Topic   string   `json:"topic"`
+		Title   string   `json:"title"`
+		Brief   string   `json:"brief"`
+		Summary string   `json:"summary"`
+		Tags    []string `json:"tags"`
 	}
 	if err := json.Unmarshal([]byte(m), &v); err != nil {
-		return "", nil, err
+		return Suggestion{}, err
 	}
 	if v.Topic == "" {
 		v.Topic = v.Title
 	}
-	topic = cleanTopic(v.Topic)
-	if topic == "" {
-		return "", nil, errors.New("empty topic")
+	if v.Brief == "" {
+		v.Brief = v.Summary
 	}
-	return topic, cleanTags(v.Tags), nil
+	out := Suggestion{Topic: cleanTopic(v.Topic), Brief: cleanBrief(v.Brief), Tags: Standardize(v.Tags, vocabulary, maxTags)}
+	if out.Topic == "" {
+		return Suggestion{}, errors.New("empty topic")
+	}
+	return out, nil
 }
 
 func stripThinking(s string) string {
@@ -146,18 +175,110 @@ func cleanTopic(t string) string {
 	return t
 }
 
-func cleanTags(in []string) []string {
+const maxBriefLen = 220
+
+func cleanBrief(t string) string {
+	t = strings.Join(strings.Fields(strings.Trim(strings.TrimSpace(t), "\"'`*")), " ")
+	if len(t) > maxBriefLen {
+		cut := strings.LastIndex(t[:maxBriefLen], " ")
+		if cut < maxBriefLen/2 {
+			cut = maxBriefLen
+		}
+		t = strings.TrimRight(t[:cut], ",;:") + "..."
+	}
+	return t
+}
+
+// MaxUserTags and MaxUserTagLen bound tags edited by hand.
+const (
+	MaxUserTags   = 20
+	MaxUserTagLen = 40
+)
+
+// NormalizeTag puts a tag in the standard form: lowercase, words separated
+// by single spaces, no leading #, quotes, underscores or trailing punctuation.
+func NormalizeTag(tag string) string {
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	tag = strings.Trim(tag, "#\"'`")
+	tag = strings.ReplaceAll(tag, "_", " ")
+	tag = strings.Join(strings.Fields(tag), " ")
+	return strings.TrimRightFunc(tag, func(r rune) bool { return unicode.IsPunct(r) })
+}
+
+// variants returns singular and plural spellings to match a tag against
+// existing ones ("meeting" and "meetings", "family" and "families").
+func variants(tag string) []string {
+	v := []string{tag + "s", tag + "es"}
+	switch {
+	case strings.HasSuffix(tag, "ies"):
+		v = append(v, strings.TrimSuffix(tag, "ies")+"y")
+	case strings.HasSuffix(tag, "es"):
+		v = append(v, strings.TrimSuffix(tag, "es"), strings.TrimSuffix(tag, "s"))
+	case strings.HasSuffix(tag, "s"):
+		v = append(v, strings.TrimSuffix(tag, "s"))
+	case strings.HasSuffix(tag, "y"):
+		v = append(v, strings.TrimSuffix(tag, "y")+"ies")
+	}
+	return v
+}
+
+// Standardize normalizes tags, maps each onto an existing tag in
+// vocabulary when they differ only in case, spacing or singular/plural,
+// drops duplicates and keeps at most limit.
+func Standardize(tags, vocabulary []string, limit int) []string {
+	known := map[string]string{}
+	for _, v := range vocabulary {
+		if n := NormalizeTag(v); n != "" {
+			known[n] = n
+			known[strings.ReplaceAll(n, "-", " ")] = n
+		}
+	}
 	seen := map[string]bool{}
 	var out []string
-	for _, tag := range in {
-		tag = strings.ToLower(strings.TrimSpace(strings.Trim(tag, "#\"'`")))
-		tag = strings.Join(strings.Fields(tag), " ")
-		if tag == "" || len(tag) > maxTagLen || seen[tag] {
+	for _, tag := range tags {
+		tag = NormalizeTag(tag)
+		if tag == "" {
+			continue
+		}
+		if k, ok := known[tag]; ok {
+			tag = k
+		} else if k, ok := known[strings.ReplaceAll(tag, "-", " ")]; ok {
+			tag = k
+		} else {
+			for _, v := range variants(tag) {
+				if k, ok := known[v]; ok {
+					tag = k
+					break
+				}
+			}
+		}
+		if len(tag) > maxTagLen {
+			continue
+		}
+		if seen[tag] {
 			continue
 		}
 		seen[tag] = true
 		out = append(out, tag)
-		if len(out) == maxTags {
+		if len(out) == limit {
+			break
+		}
+	}
+	return out
+}
+
+// CleanUserTags normalizes tags entered by hand, keeping their order.
+func CleanUserTags(tags []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, tag := range tags {
+		tag = NormalizeTag(tag)
+		if tag == "" || len(tag) > MaxUserTagLen || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		out = append(out, tag)
+		if len(out) == MaxUserTags {
 			break
 		}
 	}

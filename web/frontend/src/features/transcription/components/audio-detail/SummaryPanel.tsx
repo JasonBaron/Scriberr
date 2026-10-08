@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { Sparkles, Copy, FileDown, FileText, RefreshCw, ChevronDown, ChevronUp, Wand2, Tag } from "lucide-react";
+import { Sparkles, Copy, FileDown, FileText, RefreshCw, ChevronDown, ChevronUp, Wand2 } from "lucide-react";
 import { useSummaries } from "@/features/transcription/hooks/useTranscriptionSummary";
 import { useUpdateTitle, type AudioFile } from "@/features/transcription/hooks/useAudioDetail";
 import { SummaryMarkdown } from "./SummaryMarkdown";
@@ -22,8 +22,8 @@ function formatWhen(iso: string): string {
 }
 
 // SummaryPanel shows the stored summary on the job page, with copy and
-// download, a switcher when there are several, and the suggested title and
-// tags from the last summary.
+// download, a switcher when there are several, and the suggested title from
+// the last summary. Tags live in the page header (TagEditor).
 export function SummaryPanel({ audioId, audioFile, onRegenerate }: SummaryPanelProps) {
     const { toast } = useToast();
     const { data: summaries = [] } = useSummaries(audioId);
@@ -41,7 +41,6 @@ export function SummaryPanel({ audioId, audioFile, onRegenerate }: SummaryPanelP
     const selected = summaries.find(s => s.id === selectedId) || summaries[0];
     const suggestedTitle = audioFile.suggested_title?.trim();
     const showTitleSuggestion = !!suggestedTitle && suggestedTitle !== (audioFile.title || "").trim();
-    const tags = audioFile.suggested_tags || [];
 
     if (!selected) return null;
 
@@ -106,7 +105,7 @@ export function SummaryPanel({ audioId, audioFile, onRegenerate }: SummaryPanelP
                 <p className="mt-2 text-xs text-[var(--text-tertiary)]">{label(selected)}</p>
             )}
 
-            {(showTitleSuggestion || tags.length > 0) && (
+            {showTitleSuggestion && (
                 <div className="mt-3 space-y-2">
                     {showTitleSuggestion && (
                         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -125,16 +124,6 @@ export function SummaryPanel({ audioId, audioFile, onRegenerate }: SummaryPanelP
                             >
                                 Apply
                             </Button>
-                        </div>
-                    )}
-                    {tags.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                            <Tag className="h-3.5 w-3.5 text-[var(--text-tertiary)] shrink-0" />
-                            {tags.map(t => (
-                                <span key={t} className="text-xs px-2 py-0.5 rounded-full bg-[var(--bg-main)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
-                                    {t}
-                                </span>
-                            ))}
                         </div>
                     )}
                 </div>

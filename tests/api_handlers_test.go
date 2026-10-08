@@ -452,6 +452,45 @@ func (suite *APIHandlerTestSuite) TestListSummariesForTranscription() {
 	assert.Equal(suite.T(), "", names["two"])
 }
 
+// Test editing tags and listing the tags in use
+func (suite *APIHandlerTestSuite) TestUpdateTagsAndListTags() {
+	testJob := suite.helper.CreateTestTranscriptionJob(suite.T(), "Tagged")
+
+	w := suite.makeAuthenticatedRequest("PUT", fmt.Sprintf("/api/v1/transcription/%s/tags", testJob.ID), map[string]interface{}{
+		"tags": []string{" Family ", "family", "#Q4_Planning"},
+	}, false)
+	assert.Equal(suite.T(), 200, w.Code)
+
+	w = suite.makeAuthenticatedRequest("GET", fmt.Sprintf("/api/v1/transcription/%s", testJob.ID), nil, false)
+	var job models.TranscriptionJob
+	assert.NoError(suite.T(), json.Unmarshal(w.Body.Bytes(), &job))
+	assert.Equal(suite.T(), models.StringList{"family", "q4 planning"}, job.Tags)
+	assert.True(suite.T(), job.TagsEdited)
+
+	w = suite.makeAuthenticatedRequest("GET", "/api/v1/tags", nil, false)
+	assert.Equal(suite.T(), 200, w.Code)
+	var counts []repository.TagCount
+	assert.NoError(suite.T(), json.Unmarshal(w.Body.Bytes(), &counts))
+	assert.Len(suite.T(), counts, 2)
+
+	w = suite.makeAuthenticatedRequest("PUT", "/api/v1/transcription/missing/tags", map[string]interface{}{"tags": []string{"x"}}, false)
+	assert.Equal(suite.T(), 404, w.Code)
+}
+
+// Test that summary settings keep fields that are not sent
+func (suite *APIHandlerTestSuite) TestSummarySettingsAutoSummarize() {
+	w := suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{"default_model": "m1"}, false)
+	assert.Equal(suite.T(), 200, w.Code)
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{"auto_summarize": true}, false)
+	assert.Equal(suite.T(), 200, w.Code)
+
+	w = suite.makeAuthenticatedRequest("GET", "/api/v1/summaries/settings", nil, false)
+	var resp api.SummarySettingsResponse
+	assert.NoError(suite.T(), json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(suite.T(), "m1", resp.DefaultModel)
+	assert.True(suite.T(), resp.AutoSummarize)
+}
+
 // Test deleting transcription job
 func (suite *APIHandlerTestSuite) TestDeleteTranscriptionJob() {
 	testJob := suite.helper.CreateTestTranscriptionJob(suite.T(), "Job to Delete")

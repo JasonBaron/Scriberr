@@ -23,6 +23,7 @@ import { ExecutionInfoDialog } from "./audio-detail/ExecutionInfoDialog";
 import { LogsDialog } from "./audio-detail/LogsDialog";
 import { SummaryDialog } from "./audio-detail/SummaryDialog";
 import { SummaryPanel } from "./audio-detail/SummaryPanel";
+import { TagEditor } from "./audio-detail/TagEditor";
 import { ChatSidePanel } from "./ChatSidePanel";
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -294,6 +295,9 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                                     )}
                                                 </div>
                                             </div>
+                                            {audioFile.status === "completed" && (
+                                                <TagEditor audioId={audioId} tags={audioFile.tags || []} />
+                                            )}
                                             {(audioFile.status === "processing" || audioFile.status === "pending") && typeof pipelineProgress === "number" && (
                                                 <div className="mt-2 max-w-xs">
                                                     <div className="h-1.5 rounded-full bg-gray-200 dark:bg-zinc-700 overflow-hidden">

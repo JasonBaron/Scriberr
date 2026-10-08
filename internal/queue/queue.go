@@ -244,6 +244,8 @@ func (tq *TaskQueue) worker(id int) {
 				logger.Debug("Job processed successfully", "worker_id", id, "job_id", jobID)
 				if err := tq.updateJobStatus(jobID, models.StatusCompleted); err != nil {
 					logger.Error("Failed to update job status", "job_id", jobID, "error", err)
+				} else {
+					runCompletedHooks(jobID)
 				}
 			}
 

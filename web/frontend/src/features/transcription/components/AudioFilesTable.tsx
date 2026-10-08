@@ -834,6 +834,11 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 											<h4 className="font-normal text-gray-900 dark:text-gray-100 truncate text-lg leading-tight group-hover:text-[#FF6D20] transition-colors">
 												{file.title || getFileName(file.audio_path)}
 											</h4>
+											{file.summary_brief && (
+												<p className="mt-0.5 text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+													{file.summary_brief}
+												</p>
+											)}
 											<div
 												className="flex items-center gap-1.5 mt-1 text-sm text-gray-500"
 												title={file.recorded_at ? `Recorded ${formatDate(file.recorded_at)} · uploaded ${formatDate(file.created_at)}` : `Uploaded ${formatDate(file.created_at)}`}
@@ -846,9 +851,9 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 													</>
 												)}
 											</div>
-											{file.suggested_tags && file.suggested_tags.length > 0 && (
+											{file.tags && file.tags.length > 0 && (
 												<div className="flex flex-wrap gap-1 mt-1.5">
-													{file.suggested_tags.map(tag => (
+													{file.tags.map(tag => (
 														<button
 															key={tag}
 															type="button"

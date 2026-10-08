@@ -165,6 +165,7 @@ func main() {
 
 	// Free Ollama's GPU memory before each transcription
 	gpu.OnBeforeTranscription(handler.UnloadLocalLLM)
+	queue.OnJobCompleted(handler.AutoSummarize)
 
 	// Set up router. Until model environments are ready, /health reports
 	// "starting" and API writes return 503 (see internal/api/startup.go).
