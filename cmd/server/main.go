@@ -24,6 +24,7 @@ import (
 	"scriberr/internal/transcription"
 	"scriberr/internal/transcription/adapters"
 	"scriberr/internal/transcription/registry"
+	"scriberr/pkg/clock"
 	"scriberr/pkg/logger"
 )
 
@@ -59,6 +60,9 @@ var (
 // @description JWT token with Bearer prefix
 
 func main() {
+	// Store all timestamps in UTC; TZ only affects how log times are shown.
+	clock.UseUTCForData()
+
 	// Handle version flag
 	var showVersion = flag.Bool("version", false, "Show version information")
 	flag.Parse()

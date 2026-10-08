@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"scriberr/pkg/clock"
 )
 
 // Logger wraps slog.Logger with convenience methods
@@ -71,7 +72,7 @@ func Init(level string) {
 			if a.Key == slog.TimeKey {
 				return slog.Attr{
 					Key:   a.Key,
-					Value: slog.StringValue(a.Value.Time().Format("15:04:05")),
+					Value: slog.StringValue(a.Value.Time().In(clock.Display).Format("15:04:05")),
 				}
 			}
 			// Clean level names
@@ -277,7 +278,7 @@ func GinLogger() gin.HandlerFunc {
 		} else {
 			// Clean format for INFO: "INFO  15:04:05 GET /api/v1/transcription/submit 200 5.13ms"
 			fmt.Printf("INFO  %s %s %s %s%d%s %s\n",
-				time.Now().Format("15:04:05"),
+				clock.Now().Format("15:04:05"),
 				c.Request.Method,
 				path,
 				statusColor,

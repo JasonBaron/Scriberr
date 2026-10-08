@@ -153,7 +153,7 @@ Upstream settings (`HOST`, `PORT`, `DATABASE_PATH`, `ALLOWED_ORIGINS`, `SECURE_C
 | `OLLAMA_NUM_CTX_MAX` | `32768` | Cap on the automatic context size (KV cache uses GPU memory) |
 | `UV_PYTHON_INSTALL_DIR` | `/app/whisperx-env/.uv-python` | Where uv installs Python (set in the image) |
 | `NLTK_DATA` | `/app/whisperx-env/.nltk_data` | WhisperX alignment tokenizer data (set in the image) |
-| `TZ` | UTC | Time zone for job log timestamps |
+| `TZ` | UTC | Time zone for log timestamps. Stored data always stays in UTC |
 | `SCRIBERR_FIX_OWNERSHIP` | `false` | Force a full `chown` of `/app/data` and `/app/whisperx-env` on start (otherwise only when the top-level owner is wrong) |
 
 For summaries and chat with Ollama, use Scriberr's **Ollama** provider. The OpenAI-compatible provider cannot pass `num_ctx`, so long transcripts get truncated there.
