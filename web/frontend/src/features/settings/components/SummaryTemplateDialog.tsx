@@ -14,6 +14,8 @@ export interface SummaryTemplate {
   model?: string;
   prompt: string;
   include_speaker_info?: boolean;
+  reasoning?: boolean;
+  is_default?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -31,6 +33,8 @@ export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial }: S
   const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState("");
   const [includeSpeakerInfo, setIncludeSpeakerInfo] = useState(false);
+  const [reasoning, setReasoning] = useState(false);
+  const [isDefault, setIsDefault] = useState(false);
   const [saving, setSaving] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const { getAuthHeaders } = useAuth();
@@ -42,6 +46,8 @@ export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial }: S
       setModel(initial?.model || "");
       setPrompt(initial?.prompt || "");
       setIncludeSpeakerInfo(initial?.include_speaker_info || false);
+      setReasoning(initial?.reasoning || false);
+      setIsDefault(initial?.is_default || false);
       // Load models when dialog opens
       (async () => {
         try {
@@ -68,7 +74,9 @@ export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial }: S
         description: description.trim() || undefined,
         model: model.trim(),
         prompt: prompt.trim(),
-        include_speaker_info: includeSpeakerInfo
+        include_speaker_info: includeSpeakerInfo,
+        reasoning,
+        is_default: isDefault
       });
       onOpenChange(false);
     } finally {
@@ -152,6 +160,27 @@ Summarize the following transcript into concise bullet points. Focus on key deci
             label="Include speaker identification in transcript"
             checked={includeSpeakerInfo}
             onCheckedChange={setIncludeSpeakerInfo}
+          />
+
+          {/* Reasoning Toggle */}
+          <div className="space-y-1">
+            <SwitchField
+              id="reasoning"
+              label="Allow reasoning (thinking) for models that support it"
+              checked={reasoning}
+              onCheckedChange={setReasoning}
+            />
+            <p className="text-xs text-[var(--text-tertiary)] pl-12">
+              Off is faster and uses fewer tokens. Only affects reasoning models such as qwen3 or deepseek-r1.
+            </p>
+          </div>
+
+          {/* Default Toggle */}
+          <SwitchField
+            id="isDefault"
+            label="Default template (preselected when summarizing)"
+            checked={isDefault}
+            onCheckedChange={setIsDefault}
           />
         </div>
 

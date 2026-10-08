@@ -16,6 +16,21 @@ type SummaryTemplateRequest struct {
 	Model              string  `json:"model" binding:"required,min=1"`
 	Prompt             string  `json:"prompt" binding:"required,min=1"`
 	IncludeSpeakerInfo *bool   `json:"include_speaker_info"`
+	Reasoning          *bool   `json:"reasoning"`
+	IsDefault          *bool   `json:"is_default"`
+}
+
+// applyTemplateFlags copies the optional flags from a request onto a template.
+func applyTemplateFlags(item *models.SummaryTemplate, req SummaryTemplateRequest) {
+	if req.IncludeSpeakerInfo != nil {
+		item.IncludeSpeakerInfo = *req.IncludeSpeakerInfo
+	}
+	if req.Reasoning != nil {
+		item.Reasoning = *req.Reasoning
+	}
+	if req.IsDefault != nil {
+		item.IsDefault = *req.IsDefault
+	}
 }
 
 type SummarySettingsRequest struct {
@@ -74,12 +89,16 @@ func (h *Handler) CreateSummaryTemplate(c *gin.Context) {
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-	if req.IncludeSpeakerInfo != nil {
-		item.IncludeSpeakerInfo = *req.IncludeSpeakerInfo
-	}
+	applyTemplateFlags(item, req)
 	if err := h.summaryRepo.Create(c.Request.Context(), item); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create template"})
 		return
+	}
+	if item.IsDefault {
+		if err := h.summaryRepo.SetDefaultTemplate(c.Request.Context(), item.ID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set default template"})
+			return
+		}
 	}
 	c.JSON(http.StatusCreated, item)
 }
@@ -139,13 +158,17 @@ func (h *Handler) UpdateSummaryTemplate(c *gin.Context) {
 	item.Description = req.Description
 	item.Model = req.Model
 	item.Prompt = req.Prompt
-	if req.IncludeSpeakerInfo != nil {
-		item.IncludeSpeakerInfo = *req.IncludeSpeakerInfo
-	}
+	applyTemplateFlags(item, req)
 	item.UpdatedAt = time.Now()
 	if err := h.summaryRepo.Update(c.Request.Context(), item); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update template"})
 		return
+	}
+	if item.IsDefault {
+		if err := h.summaryRepo.SetDefaultTemplate(c.Request.Context(), item.ID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set default template"})
+			return
+		}
 	}
 	c.JSON(http.StatusOK, item)
 }

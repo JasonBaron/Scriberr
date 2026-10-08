@@ -27,7 +27,7 @@ import remarkMath from 'remark-math';
 import rehypeRaw from 'rehype-raw';
 import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
-import { useSummaryTemplates, useSummarizer, useExistingSummary } from "@/features/transcription/hooks/useTranscriptionSummary";
+import { useSummaryTemplates, useSummarizer, useExistingSummary, pickInitialTemplate } from "@/features/transcription/hooks/useTranscriptionSummary";
 
 import { useTranscript, useAudioDetail, type Transcript } from "@/features/transcription/hooks/useAudioDetail";
 import { useSpeakerMappings } from "@/features/transcription/hooks/useTranscriptionSpeakers";
@@ -83,6 +83,14 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
             setShowOutput(true);
         }
     }, [isOpen, existingSummary, summaryLoading, isStreaming, streamContent]);
+
+    // Preselect the default (or last used) template when the selector shows
+    useEffect(() => {
+        if (isOpen && !showOutput && !selectedTemplateId && templates.length > 0) {
+            const initial = pickInitialTemplate(templates);
+            if (initial) setSelectedTemplateId(initial);
+        }
+    }, [isOpen, showOutput, selectedTemplateId, templates]);
 
     // Reset state when dialog closes
     useEffect(() => {
@@ -175,7 +183,6 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
                                 size="sm"
                                 onClick={() => {
                                     setShowOutput(false);
-                                    setSelectedTemplateId('');
                                 }}
                                 disabled={isStreaming}
                                 className="h-9 rounded-full border-[rgba(0,0,0,0.06)] dark:border-[rgba(255,255,255,0.08)] hover:bg-[var(--bg-main)] transition-all"

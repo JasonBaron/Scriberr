@@ -85,6 +85,12 @@ export function SummaryTemplatesTable({ onEdit, refreshTrigger = 0, disabled = f
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3">
                   <h3 className="text-sm font-medium text-[var(--text-primary)] truncate">{tpl.name}</h3>
+                  {tpl.is_default && (
+                    <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--brand-solid)]/10 text-[var(--brand-solid)]">Default</span>
+                  )}
+                  {tpl.reasoning && (
+                    <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--bg-main)] text-[var(--text-tertiary)] border border-[var(--border-subtle)]">Reasoning</span>
+                  )}
                   <span className="text-xs text-[var(--text-tertiary)] whitespace-nowrap">{formatDate(tpl.created_at)}</span>
                 </div>
                 {tpl.description && (

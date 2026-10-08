@@ -346,6 +346,7 @@ type SummaryRepository interface {
 	GetLatestSummary(ctx context.Context, transcriptionID string) (*models.Summary, error)
 	DeleteByTranscriptionID(ctx context.Context, transcriptionID string) error
 	ListSummaries(ctx context.Context, transcriptionID string) ([]models.Summary, error)
+	SetDefaultTemplate(ctx context.Context, id string) error
 	SaveSuggestions(ctx context.Context, jobID, suggestedTitle string, tags models.StringList, applyTitle bool) error
 }
 
@@ -677,4 +678,15 @@ func (r *summaryRepository) SaveSuggestions(ctx context.Context, jobID, suggeste
 		updates["title"] = suggestedTitle
 	}
 	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).Updates(updates).Error
+}
+
+// SetDefaultTemplate marks one template as the default and clears the flag
+// on every other template.
+func (r *summaryRepository) SetDefaultTemplate(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.SummaryTemplate{}).Where("id <> ?", id).Update("is_default", false).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.SummaryTemplate{}).Where("id = ?", id).Update("is_default", true).Error
+	})
 }

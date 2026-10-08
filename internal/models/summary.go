@@ -17,7 +17,10 @@ type SummaryTemplate struct {
 	IncludeSpeakerInfo bool    `json:"include_speaker_info" gorm:"default:false"`
 	// Reasoning lets reasoning models (qwen3, deepseek-r1) think before
 	// answering. Off by default: summaries rarely need it and it is slower.
-	Reasoning bool      `json:"reasoning" gorm:"default:false"`
+	Reasoning bool `json:"reasoning" gorm:"default:false"`
+	// IsDefault marks the template preselected in the Summarize dialog. At
+	// most one template is the default.
+	IsDefault bool      `json:"is_default" gorm:"default:false"`
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }

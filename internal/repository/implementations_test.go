@@ -95,3 +95,24 @@ func TestListSummaries(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list, 2)
 }
+
+func TestSetDefaultTemplate(t *testing.T) {
+	_, db := newTestJobRepository(t)
+	require.NoError(t, db.AutoMigrate(&models.SummaryTemplate{}))
+	repo := NewSummaryRepository(db)
+	ctx := context.Background()
+
+	a := &models.SummaryTemplate{Name: "a", Model: "m", Prompt: "p", IsDefault: true}
+	b := &models.SummaryTemplate{Name: "b", Model: "m", Prompt: "p"}
+	require.NoError(t, repo.Create(ctx, a))
+	require.NoError(t, repo.Create(ctx, b))
+
+	require.NoError(t, repo.SetDefaultTemplate(ctx, b.ID))
+
+	gotA, err := repo.FindByID(ctx, a.ID)
+	require.NoError(t, err)
+	gotB, err := repo.FindByID(ctx, b.ID)
+	require.NoError(t, err)
+	require.False(t, gotA.IsDefault)
+	require.True(t, gotB.IsDefault)
+}
