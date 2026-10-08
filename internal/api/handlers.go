@@ -24,6 +24,7 @@ import (
 	"scriberr/internal/service"
 	"scriberr/internal/sse"
 	"scriberr/internal/transcription"
+	"scriberr/internal/transcription/registry"
 	"scriberr/pkg/logger"
 
 	"github.com/gin-gonic/gin"
@@ -2240,6 +2241,9 @@ func (h *Handler) GetSupportedModels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"models":    models,
 		"languages": languages,
+		// Model IDs allowed by SCRIBERR_ENABLED_MODELS; null means all.
+		// The UI hides the others.
+		"enabled_models": registry.GetRegistry().EnabledModelIDs(),
 	})
 }
 

@@ -117,3 +117,19 @@ func TestInitializeModelsSkipsDisabledModels(t *testing.T) {
 		t.Errorf("expected enabled model not to be re-prepared, got %d", got)
 	}
 }
+
+func TestEnabledModelIDs(t *testing.T) {
+	r := &ModelRegistry{}
+	if ids := r.EnabledModelIDs(); ids != nil {
+		t.Errorf("unrestricted registry: got %v, want nil", ids)
+	}
+	r.SetEnabledModels([]string{"whisperx", " pyannote "})
+	ids := r.EnabledModelIDs()
+	if len(ids) != 2 || ids[0] != "pyannote" || ids[1] != "whisperx" {
+		t.Errorf("got %v, want [pyannote whisperx]", ids)
+	}
+	r.SetEnabledModels(nil)
+	if ids := r.EnabledModelIDs(); ids != nil {
+		t.Errorf("after reset: got %v, want nil", ids)
+	}
+}

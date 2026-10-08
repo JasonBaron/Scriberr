@@ -73,6 +73,22 @@ func (r *ModelRegistry) SetEnabledModels(modelIDs []string) {
 		"models", strings.Join(modelIDs, ", "))
 }
 
+// EnabledModelIDs returns the models allowed by SCRIBERR_ENABLED_MODELS,
+// sorted, or nil when every model is enabled.
+func (r *ModelRegistry) EnabledModelIDs() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.enabledModels == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(r.enabledModels))
+	for id := range r.enabledModels {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // isEnabled reports whether a model should be initialized on startup.
 // Callers must hold r.mu.
 func (r *ModelRegistry) isEnabled(modelID string) bool {
