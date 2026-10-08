@@ -62,6 +62,8 @@ export interface AudioFile {
     merge_error?: string;
     suggested_title?: string;
     suggested_tags?: string[];
+    recorded_at?: string;
+    recorded_at_source?: string;
     parameters?: {
         diarize?: boolean;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

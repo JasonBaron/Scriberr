@@ -18,6 +18,8 @@ type TranscriptionJob struct {
 	Summary               *string        `json:"summary,omitempty" gorm:"type:text"`
 	SuggestedTitle        *string        `json:"suggested_title,omitempty" gorm:"type:text"`
 	SuggestedTags         StringList     `json:"suggested_tags,omitempty" gorm:"type:text"`
+	RecordedAt            *time.Time     `json:"recorded_at,omitempty"`                                // from file metadata or the file's modified time; nil if unknown
+	RecordedAtSource      string         `json:"recorded_at_source,omitempty" gorm:"type:varchar(20)"` // metadata or file
 	ErrorMessage          *string        `json:"error_message,omitempty" gorm:"type:text"`
 	IsMultiTrack          bool           `json:"is_multi_track" gorm:"type:boolean;default:false"`
 	AupFilePath           *string        `json:"aup_file_path,omitempty" gorm:"type:text"`

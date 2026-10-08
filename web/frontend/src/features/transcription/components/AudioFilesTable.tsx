@@ -834,8 +834,11 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 											<h4 className="font-normal text-gray-900 dark:text-gray-100 truncate text-lg leading-tight group-hover:text-[#FF6D20] transition-colors">
 												{file.title || getFileName(file.audio_path)}
 											</h4>
-											<div className="flex items-center gap-1.5 mt-1 text-sm text-gray-500">
-												{formatDate(file.created_at)}
+											<div
+												className="flex items-center gap-1.5 mt-1 text-sm text-gray-500"
+												title={file.recorded_at ? `Recorded ${formatDate(file.recorded_at)} · uploaded ${formatDate(file.created_at)}` : `Uploaded ${formatDate(file.created_at)}`}
+											>
+												{formatDate(file.recorded_at || file.created_at)}
 												{(file.status === "processing" || file.status === "pending") && getPipelineLabel(file.pipeline_stage) && (
 													<>
 														<span className="w-1 h-1 rounded-full bg-gray-400" />

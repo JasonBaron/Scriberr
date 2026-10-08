@@ -75,6 +75,7 @@ type JobRepository interface {
 	DeleteMultiTrackFilesByJobID(ctx context.Context, jobID string) error
 	UpdateStatus(ctx context.Context, jobID string, status models.JobStatus) error
 	UpdateError(ctx context.Context, jobID string, errorMsg string) error
+	SetRecordedAt(ctx context.Context, jobID string, recordedAt time.Time, source string) error
 	FindByStatus(ctx context.Context, status models.JobStatus) ([]models.TranscriptionJob, error)
 	CountByStatus(ctx context.Context, status models.JobStatus) (int64, error)
 	UpdateSummary(ctx context.Context, jobID string, summary string) error
@@ -216,6 +217,12 @@ func (r *jobRepository) UpdateStatus(ctx context.Context, jobID string, status m
 
 func (r *jobRepository) UpdateError(ctx context.Context, jobID string, errorMsg string) error {
 	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).Update("error_message", errorMsg).Error
+}
+
+// SetRecordedAt stores when the audio was recorded and where that came from.
+func (r *jobRepository) SetRecordedAt(ctx context.Context, jobID string, recordedAt time.Time, source string) error {
+	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).
+		Updates(map[string]interface{}{"recorded_at": recordedAt.UTC(), "recorded_at_source": source}).Error
 }
 
 func (r *jobRepository) FindByStatus(ctx context.Context, status models.JobStatus) ([]models.TranscriptionJob, error) {

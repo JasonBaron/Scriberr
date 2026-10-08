@@ -73,13 +73,15 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | | Working title (`{date} {topic}`) and up to 5 tags suggested after each summary; the title is applied automatically over placeholder names |
 | | Per-template Reasoning switch (thinking off by default) and a default template preselected in the Summarize dialog |
 | | Summary shown on the job page with copy, .md/.txt download and a switcher for multiple summaries |
+| | Tags shown in the recordings list (click to filter) and matched by search |
+| | Recorded date read from file metadata (QuickTime/MP4 `creation_time`, WAV/BWF dates), else the file's modified time; used in the list, the job page and suggested titles |
 
 ### Next
 
 | Item | Notes |
 |---|---|
 | fork-fixes-5: YouTube | Transcripts do not appear after adding a video; Shorts links are not accepted |
-| fork-features-2: recordings as units | Per-recording folders, duplicate upload detection, recorded date from metadata, zip export |
+| fork-features-2: recordings as units | Per-recording folders, duplicate upload detection, zip export |
 | fork-features-3: speakers and tags | Speaker ranges per profile, speaker names in summaries, real tags (from the suggestions) with filtering, template chosen by tag or profile |
 | Auto-summary | Summary on completion, through a local Ollama model |
 | Progress and ETA | Per-model estimates from measured real-time factors |
@@ -164,7 +166,7 @@ Upstream settings (`HOST`, `PORT`, `DATABASE_PATH`, `ALLOWED_ORIGINS`, `SECURE_C
 | `SCRIBERR_UNLOAD_LLM_BEFORE_TRANSCRIPTION` | `true` | Unload every Ollama model before a transcription starts |
 | `SCRIBERR_UNLOAD_LLM_AFTER_SUMMARY` | `true` | Unload the summary model when the summary and title are done |
 | `SCRIBERR_SUGGEST_TITLES` | `true` | Suggest a title and tags after each summary |
-| `SCRIBERR_TITLE_FORMAT` | `{date} {topic}` | Pattern for suggested titles; `{date}` is the job's date (YYYY-MM-DD) in `TZ` |
+| `SCRIBERR_TITLE_FORMAT` | `{date} {topic}` | Pattern for suggested titles; `{date}` is the recorded date (upload date if unknown), YYYY-MM-DD in `TZ` |
 | `SCRIBERR_FIX_OWNERSHIP` | `false` | Force a full `chown` of `/app/data` and `/app/whisperx-env` on start (otherwise only when the top-level owner is wrong) |
 
 For summaries and chat with Ollama, use Scriberr's **Ollama** provider. The OpenAI-compatible provider cannot pass `num_ctx`, so long transcripts get truncated there.

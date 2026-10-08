@@ -173,7 +173,8 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
     }
 
     // Helper to format date "Premium" style
-    const formattedDate = new Date(audioFile.created_at).toLocaleDateString("en-US", {
+    // Recorded date when known (file metadata or modified time), else upload date
+    const formattedDate = new Date(audioFile.recorded_at || audioFile.created_at).toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric"

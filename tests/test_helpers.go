@@ -370,6 +370,11 @@ func (m *MockJobRepository) UpdateError(ctx context.Context, jobID string, error
 	return args.Error(0)
 }
 
+func (m *MockJobRepository) SetRecordedAt(ctx context.Context, jobID string, recordedAt time.Time, source string) error {
+	args := m.Called(ctx, jobID, recordedAt, source)
+	return args.Error(0)
+}
+
 func (m *MockJobRepository) FindByStatus(ctx context.Context, status models.JobStatus) ([]models.TranscriptionJob, error) {
 	args := m.Called(ctx, status)
 	if args.Get(0) == nil {

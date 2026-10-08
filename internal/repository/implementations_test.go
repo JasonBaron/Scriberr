@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"testing"
+	"time"
 
 	"scriberr/internal/models"
 
@@ -129,4 +130,19 @@ func TestListWithParams_SearchesSuggestedTags(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, count)
 	require.Equal(t, "1", jobs[0].ID)
+}
+
+func TestSetRecordedAt(t *testing.T) {
+	repo, db := newTestJobRepository(t)
+	ctx := context.Background()
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "1", AudioPath: "a.m4a"}).Error)
+
+	when := time.Date(2026, 9, 14, 17, 5, 22, 0, time.UTC)
+	require.NoError(t, repo.SetRecordedAt(ctx, "1", when, "metadata"))
+
+	var got models.TranscriptionJob
+	require.NoError(t, db.First(&got, "id = ?", "1").Error)
+	require.NotNil(t, got.RecordedAt)
+	require.True(t, got.RecordedAt.Equal(when))
+	require.Equal(t, "metadata", got.RecordedAtSource)
 }

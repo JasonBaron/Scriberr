@@ -114,7 +114,8 @@ func (h *Handler) afterSummary(ctx context.Context, req SummarizeRequest, svc ll
 		return
 	}
 
-	title := titles.Format(titles.Pattern(), job.CreatedAt.In(clock.Display), topic)
+	h.ensureRecordedAt(ctx, job)
+	title := titles.Format(titles.Pattern(), jobDate(job).In(clock.Display), topic)
 	current := ""
 	if job.Title != nil {
 		current = *job.Title
