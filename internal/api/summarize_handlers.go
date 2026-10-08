@@ -267,3 +267,50 @@ func (h *Handler) GetSummaryForTranscription(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, s)
 }
+
+// SummaryListItem is one stored summary with its template name.
+type SummaryListItem struct {
+	ID           string    `json:"id"`
+	TemplateID   *string   `json:"template_id,omitempty"`
+	TemplateName string    `json:"template_name,omitempty"`
+	Model        string    `json:"model"`
+	Content      string    `json:"content"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// ListSummariesForTranscription returns every stored summary for a
+// transcription, newest first
+// @Summary List summaries for transcription
+// @Description Get all saved summaries for the given transcription, newest first
+// @Tags summarize
+// @Produce json
+// @Param id path string true "Transcription ID"
+// @Success 200 {array} SummaryListItem
+// @Failure 500 {object} map[string]string
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /api/v1/transcription/{id}/summaries [get]
+func (h *Handler) ListSummariesForTranscription(c *gin.Context) {
+	ctx := c.Request.Context()
+	tid := c.Param("id")
+	list, err := h.summaryRepo.ListSummaries(ctx, tid)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch summaries"})
+		return
+	}
+	names := map[string]string{}
+	if tpls, _, err := h.summaryRepo.List(ctx, 0, 1000); err == nil {
+		for _, t := range tpls {
+			names[t.ID] = t.Name
+		}
+	}
+	out := make([]SummaryListItem, 0, len(list))
+	for _, s := range list {
+		item := SummaryListItem{ID: s.ID, TemplateID: s.TemplateID, Model: s.Model, Content: s.Content, CreatedAt: s.CreatedAt}
+		if s.TemplateID != nil {
+			item.TemplateName = names[*s.TemplateID]
+		}
+		out = append(out, item)
+	}
+	c.JSON(http.StatusOK, out)
+}

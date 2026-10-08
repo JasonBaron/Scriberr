@@ -22,6 +22,7 @@ import { TranscriptSection } from "./audio-detail/TranscriptSection";
 import { ExecutionInfoDialog } from "./audio-detail/ExecutionInfoDialog";
 import { LogsDialog } from "./audio-detail/LogsDialog";
 import { SummaryDialog } from "./audio-detail/SummaryDialog";
+import { SummaryPanel } from "./audio-detail/SummaryPanel";
 import { ChatSidePanel } from "./ChatSidePanel";
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -420,6 +421,13 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                         />
                                     </div>
                                 </div>
+
+                                {/* Summary (shown when one has been generated) */}
+                                <SummaryPanel
+                                    audioId={audioId}
+                                    audioFile={audioFile}
+                                    onRegenerate={() => setSummaryDialogOpen(true)}
+                                />
 
                                 {/* Transcript */}
                                 <TranscriptSectionWrapper

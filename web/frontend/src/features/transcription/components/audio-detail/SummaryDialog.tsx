@@ -22,11 +22,8 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useState, useEffect } from "react";
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import rehypeRaw from 'rehype-raw';
-import rehypeKatex from 'rehype-katex';
-import rehypeHighlight from 'rehype-highlight';
+import { SummaryMarkdown } from "./SummaryMarkdown";
+import { downloadText, summaryFilename } from "./summaryFiles";
 import { useSummaryTemplates, useSummarizer, useExistingSummary, pickInitialTemplate } from "@/features/transcription/hooks/useTranscriptionSummary";
 
 import { useTranscript, useAudioDetail, type Transcript } from "@/features/transcription/hooks/useAudioDetail";
@@ -124,18 +121,7 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
         const content = streamContent || existingSummary?.content || "";
         if (!content) return;
 
-        const title = audioFile?.title || "summary";
-        const filename = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}-summary.md`;
-
-        const blob = new Blob([content], { type: 'text/markdown' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        downloadText(content, summaryFilename(audioFile?.title, 'md'), 'text/markdown');
     };
 
     // Handle close - prevent closing during streaming
@@ -229,22 +215,7 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
                                 </div>
                             ) : (
                                 <div className="prose prose-stone dark:prose-invert max-w-none text-[#171717] dark:text-[#EDEDED] leading-relaxed">
-                                    <ReactMarkdown
-                                        remarkPlugins={[remarkMath]}
-                                        rehypePlugins={[rehypeRaw as any, rehypeKatex as any, rehypeHighlight as any]} // eslint-disable-line @typescript-eslint/no-explicit-any
-                                        components={{
-                                            p: ({ ...props }) => <p className="text-[#525252] dark:text-[#A3A3A3] leading-7 mb-4" {...props} />,
-                                            h1: ({ ...props }) => <h1 className="text-[#171717] dark:text-[#EDEDED] font-bold text-2xl mt-6 mb-4" {...props} />,
-                                            h2: ({ ...props }) => <h2 className="text-[#171717] dark:text-[#EDEDED] font-bold text-xl mt-6 mb-3" {...props} />,
-                                            h3: ({ ...props }) => <h3 className="text-[#171717] dark:text-[#EDEDED] font-bold text-lg mt-5 mb-2" {...props} />,
-                                            li: ({ ...props }) => <li className="pl-1 text-[#525252] dark:text-[#A3A3A3] mb-1" {...props} />,
-                                            strong: ({ ...props }) => <strong className="text-[#171717] dark:text-[#EDEDED] font-bold" {...props} />,
-                                            ul: ({ ...props }) => <ul className="list-disc pl-5 mb-4" {...props} />,
-                                            ol: ({ ...props }) => <ol className="list-decimal pl-5 mb-4" {...props} />,
-                                        }}
-                                    >
-                                        {streamContent || existingSummary?.content || ""}
-                                    </ReactMarkdown>
+                                    <SummaryMarkdown content={streamContent || existingSummary?.content || ""} />
                                     {isStreaming && (
                                         <span className="inline-block w-2 h-5 bg-[var(--brand-solid)] ml-0.5 animate-pulse align-middle" />
                                     )}

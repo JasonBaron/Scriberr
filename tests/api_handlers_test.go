@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -426,6 +427,29 @@ func (suite *APIHandlerTestSuite) TestUpdateTranscriptionTitle() {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), "Updated Title", *response.Title)
+}
+
+// Test listing every stored summary for a job, with template names
+func (suite *APIHandlerTestSuite) TestListSummariesForTranscription() {
+	testJob := suite.helper.CreateTestTranscriptionJob(suite.T(), "Summaries")
+	tpl := suite.helper.CreateTestSummaryTemplate(suite.T(), "Brief")
+	ctx := context.Background()
+	repo := repository.NewSummaryRepository(suite.helper.DB)
+	assert.NoError(suite.T(), repo.SaveSummary(ctx, &models.Summary{TranscriptionID: testJob.ID, TemplateID: &tpl.ID, Model: "m", Content: "one"}))
+	assert.NoError(suite.T(), repo.SaveSummary(ctx, &models.Summary{TranscriptionID: testJob.ID, Model: "m", Content: "two"}))
+
+	w := suite.makeAuthenticatedRequest("GET", fmt.Sprintf("/api/v1/transcription/%s/summaries", testJob.ID), nil, false)
+	assert.Equal(suite.T(), 200, w.Code)
+
+	var items []api.SummaryListItem
+	assert.NoError(suite.T(), json.Unmarshal(w.Body.Bytes(), &items))
+	assert.Len(suite.T(), items, 2)
+	names := map[string]string{}
+	for _, it := range items {
+		names[it.Content] = it.TemplateName
+	}
+	assert.Equal(suite.T(), "Brief", names["one"])
+	assert.Equal(suite.T(), "", names["two"])
 }
 
 // Test deleting transcription job

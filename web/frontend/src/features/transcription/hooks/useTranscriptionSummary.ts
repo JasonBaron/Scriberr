@@ -71,6 +71,30 @@ export function useExistingSummary(audioId: string) {
     });
 }
 
+export interface StoredSummary {
+    id: string;
+    template_id?: string;
+    template_name?: string;
+    model: string;
+    content: string;
+    created_at: string;
+}
+
+export function useSummaries(audioId: string, enabled = true) {
+    const { getAuthHeaders } = useAuth();
+    return useQuery({
+        queryKey: ["summaries", audioId],
+        queryFn: async () => {
+            const response = await fetch(`/api/v1/transcription/${audioId}/summaries`, {
+                headers: getAuthHeaders(),
+            });
+            if (!response.ok) return [] as StoredSummary[];
+            return response.json() as Promise<StoredSummary[]>;
+        },
+        enabled: enabled && !!audioId,
+    });
+}
+
 export function useSummarizer(audioId: string) {
     const { getAuthHeaders } = useAuth();
     const queryClient = useQueryClient();
