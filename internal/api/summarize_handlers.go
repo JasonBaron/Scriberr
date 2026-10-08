@@ -94,6 +94,7 @@ func (h *Handler) Summarize(c *gin.Context) {
 		defer releaseGPU()
 		h.afterSummary(context.Background(), req, svc, summary, completed)
 		unloadAfterSummary(svc, req.Model)
+		h.SyncRecording(context.Background(), req.TranscriptionID)
 	}()
 }
 

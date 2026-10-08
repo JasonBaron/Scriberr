@@ -51,8 +51,9 @@ func inspectUpload(c *gin.Context, path, originalName string) uploadFacts {
 	return f
 }
 
-// applyUpload copies the upload facts onto a new job and lists any earlier
-// recordings with the same file, so the response can warn about them.
+// applyUpload copies the upload facts onto a new job, lists any earlier
+// recordings with the same file so the response can warn about them, and
+// moves the audio into the recording's folder.
 func (h *Handler) applyUpload(ctx context.Context, job *models.TranscriptionJob, f uploadFacts) {
 	job.RecordedAt = f.recordedAt
 	job.RecordedAtSource = f.recordedAtSource
@@ -60,6 +61,7 @@ func (h *Handler) applyUpload(ctx context.Context, job *models.TranscriptionJob,
 	job.FileSize = f.size
 	job.OriginalFilename = f.originalName
 	job.Duplicates = h.duplicatesOf(ctx, job.ID, f.hash)
+	h.adoptAudio(job)
 	if len(job.Duplicates) > 0 {
 		logger.Info("Upload matches an existing recording", "job_id", job.ID, "duplicate_of", job.Duplicates[0].ID)
 	}

@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,7 +21,7 @@ func (h *Handler) GetJobLogs(c *gin.Context) {
 	jobID := c.Param("id")
 
 	// Construct path to log file
-	logPath := filepath.Join(h.config.TranscriptsDir, jobID, "transcription.log")
+	logPath := h.jobLogPath(jobID)
 
 	// Check if file exists
 	exists, err := h.fileService.FileExists(logPath)

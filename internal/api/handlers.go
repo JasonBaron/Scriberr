@@ -20,6 +20,7 @@ import (
 	"scriberr/internal/models"
 	"scriberr/internal/processing"
 	"scriberr/internal/queue"
+	"scriberr/internal/recordings"
 	"scriberr/internal/repository"
 	"scriberr/internal/service"
 	"scriberr/internal/sse"
@@ -39,6 +40,7 @@ type Handler struct {
 	userService         service.UserService
 	fileService         service.FileService
 	jobRepo             repository.JobRepository
+	recordings          recordings.Store
 	apiKeyRepo          repository.APIKeyRepository
 	profileRepo         repository.ProfileRepository
 	userRepo            repository.UserRepository
@@ -1231,6 +1233,8 @@ func (h *Handler) UpdateTranscriptionTitle(c *gin.Context) {
 		return
 	}
 
+	h.SyncRecordingAsync(job.ID)
+
 	c.JSON(http.StatusOK, gin.H{
 		"id":         job.ID,
 		"title":      job.Title,
@@ -1277,6 +1281,9 @@ func (h *Handler) DeleteTranscriptionJob(c *gin.Context) {
 	if job.AupFilePath != nil {
 		_ = h.fileService.RemoveFile(*job.AupFilePath)
 	}
+
+	// Remove the recording's folder (copies, model output, job log)
+	_ = h.recordings.Remove(job.ID)
 
 	// Manually delete related records to handle legacy DBs without CASCADE constraints
 	// 1. Delete Chat Sessions (and their messages via GORM hooks or manual if needed, but let's assume messages are cascaded by session deletion or we delete them too)
@@ -2772,10 +2779,12 @@ func (h *Handler) DownloadFromYouTube(c *gin.Context) {
 		job.Title = &title
 	}
 
+	h.adoptAudio(&job)
+
 	// Save to database
 	if err := h.jobRepo.Create(c.Request.Context(), &job); err != nil {
 		// Clean up downloaded file on database error
-		os.Remove(actualFilePath)
+		os.Remove(job.AudioPath)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save transcription record"})
 		return
 	}

@@ -147,6 +147,7 @@ func (h *Handler) AutoSummarize(jobID string) {
 
 	h.afterSummary(ctx, req, svc, summary, summary != "")
 	unloadAfterSummary(svc, tpl.Model)
+	h.SyncRecording(ctx, jobID)
 }
 
 func (h *Handler) setSummaryStatus(jobID, status string) {

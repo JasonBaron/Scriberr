@@ -78,6 +78,8 @@ type JobRepository interface {
 	UpdateError(ctx context.Context, jobID string, errorMsg string) error
 	SetRecordedAt(ctx context.Context, jobID string, recordedAt time.Time, source string) error
 	SetFileHash(ctx context.Context, jobID, hash string, size int64) error
+	SetAudioPath(ctx context.Context, jobID, path string) error
+	ListStorageInfo(ctx context.Context) ([]models.TranscriptionJob, error)
 	FindByFileHash(ctx context.Context, hash, excludeID string) ([]models.TranscriptionJob, error)
 	ListMissingFileHash(ctx context.Context, limit int) ([]models.TranscriptionJob, error)
 	FindByStatus(ctx context.Context, status models.JobStatus) ([]models.TranscriptionJob, error)
@@ -221,6 +223,20 @@ func (r *jobRepository) UpdateStatus(ctx context.Context, jobID string, status m
 
 func (r *jobRepository) UpdateError(ctx context.Context, jobID string, errorMsg string) error {
 	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).Update("error_message", errorMsg).Error
+}
+
+// SetAudioPath points a job at its audio file after it moves.
+func (r *jobRepository) SetAudioPath(ctx context.Context, jobID, path string) error {
+	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).
+		Update("audio_path", path).Error
+}
+
+// ListStorageInfo returns every job's ID, audio path and multi-track flag,
+// without the heavy transcript columns.
+func (r *jobRepository) ListStorageInfo(ctx context.Context) ([]models.TranscriptionJob, error) {
+	var jobs []models.TranscriptionJob
+	err := r.db.WithContext(ctx).Select("id", "audio_path", "is_multi_track").Order("created_at ASC").Find(&jobs).Error
+	return jobs, err
 }
 
 // SetFileHash stores the SHA-256 and size of a job's uploaded file.

@@ -123,6 +123,17 @@ func (m *MockJobRepository) UpdateError(ctx context.Context, jobID string, error
 	return args.Error(0)
 }
 
+func (m *MockJobRepository) SetAudioPath(ctx context.Context, jobID, path string) error {
+	args := m.Called(ctx, jobID, path)
+	return args.Error(0)
+}
+
+func (m *MockJobRepository) ListStorageInfo(ctx context.Context) ([]models.TranscriptionJob, error) {
+	args := m.Called(ctx)
+	jobs, _ := args.Get(0).([]models.TranscriptionJob)
+	return jobs, args.Error(1)
+}
+
 func (m *MockJobRepository) SetFileHash(ctx context.Context, jobID, hash string, size int64) error {
 	args := m.Called(ctx, jobID, hash, size)
 	return args.Error(0)

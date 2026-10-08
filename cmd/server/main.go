@@ -19,6 +19,7 @@ import (
 	"scriberr/internal/gpu"
 	"scriberr/internal/processing"
 	"scriberr/internal/queue"
+	"scriberr/internal/recordings"
 	"scriberr/internal/repository"
 	"scriberr/internal/service"
 	"scriberr/internal/sse"
@@ -163,6 +164,15 @@ func main() {
 		broadcaster,
 	)
 
+	// One folder per recording, unless the legacy layout is requested or the
+	// folders would be on a different filesystem (moves must be renames).
+	if store := recordingsStore(cfg); store.Enabled() {
+		handler.SetRecordings(store)
+		unifiedProcessor.GetUnifiedService().SetJobDir(store.ProcessingPath)
+		handler.MigrateRecordings(context.Background())
+		queue.OnJobCompleted(handler.SyncRecordingAsync)
+	}
+
 	// Free Ollama's GPU memory before each transcription
 	gpu.OnBeforeTranscription(handler.UnloadLocalLLM)
 	handler.ResetSummaryStatuses(context.Background())
@@ -272,4 +282,23 @@ func registerAdapters(cfg *config.Config) {
 		adapters.NewSortformerAdapter(nvidiaEnvPath)) // Shares with Parakeet
 
 	logger.Info("Adapter registration complete")
+}
+
+// recordingsStore returns the per-recording folder store, or a disabled one
+// when SCRIBERR_RECORDINGS_LAYOUT=legacy or when files cannot be renamed
+// from the upload and transcripts folders into it.
+func recordingsStore(cfg *config.Config) recordings.Store {
+	if cfg.RecordingsLayout == "legacy" {
+		logger.Info("Using the legacy file layout (SCRIBERR_RECORDINGS_LAYOUT=legacy)")
+		return recordings.Store{}
+	}
+	store := recordings.Store{Root: cfg.RecordingsDir}
+	for _, dir := range []string{cfg.UploadDir, cfg.TranscriptsDir} {
+		if err := store.CheckSameDevice(dir); err != nil {
+			logger.Warn("Recording folders disabled: files cannot be moved into them; keeping the legacy layout",
+				"recordings_dir", cfg.RecordingsDir, "from", dir, "error", err)
+			return recordings.Store{}
+		}
+	}
+	return store
 }
