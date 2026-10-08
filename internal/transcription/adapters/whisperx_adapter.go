@@ -297,6 +297,8 @@ func (w *WhisperXAdapter) PrepareEnvironment(ctx context.Context) error {
 
 	logger.Info("Preparing WhisperX environment", "env_path", w.envPath)
 
+	ensureNLTKDataDir()
+
 	whisperxPath := filepath.Join(w.envPath, "WhisperX")
 
 	// Check if WhisperX is already set up and working (using cache to speed up repeated checks)
@@ -403,6 +405,24 @@ func (w *WhisperXAdapter) ensureWhisperXCheckout(whisperxPath string) error {
 	}
 	_ = os.Remove(filepath.Join(whisperxPath, vadCheckpointMarker)) // checkout restored the original file
 	return nil
+}
+
+// ensureNLTKDataDir creates $NLTK_DATA if set. NLTK only downloads into an
+// existing, writable directory on its search path and otherwise falls back to
+// ~/nltk_data in the container layer, which is lost on every recreate. WhisperX
+// downloads punkt_tab during alignment and fails the job if that download fails.
+func ensureNLTKDataDir() {
+	dir := strings.TrimSpace(os.Getenv("NLTK_DATA"))
+	if dir == "" {
+		return
+	}
+	// NLTK_DATA may list several paths; the first is where downloads go.
+	if i := strings.IndexByte(dir, os.PathListSeparator); i >= 0 {
+		dir = dir[:i]
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		logger.Warn("Could not create NLTK data directory", "path", dir, "error", err)
+	}
 }
 
 // vadMigrationScript upgrades WhisperX's bundled VAD checkpoint (saved with

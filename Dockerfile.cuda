@@ -59,6 +59,8 @@ ENV PYTHONUNBUFFERED=1 \
   WHISPERX_ENV=/app/whisperx-env \
   # uv-managed Python on the env volume, so venvs survive container recreation
   UV_PYTHON_INSTALL_DIR=/app/whisperx-env/.uv-python \
+  # NLTK tokenizer data WhisperX downloads for alignment; on the volume so it is fetched once
+  NLTK_DATA=/app/whisperx-env/.nltk_data \
   APP_ENV=production \
   PUID=1000 \
   PGID=1000 \
