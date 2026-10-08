@@ -37,8 +37,10 @@ RUN rm -rf internal/web/dist && mkdir -p internal/web
 COPY --from=ui-builder /web/frontend/dist internal/web/dist
 
 # Build binary (arch matches builder platform)
+# Git commit shown in job logs; pass --build-arg GIT_SHA=$(git rev-parse --short HEAD)
+ARG GIT_SHA=dev
 RUN CGO_ENABLED=0 \
-  go build -o /out/scriberr cmd/server/main.go
+  go build -ldflags "-X scriberr/internal/joblog.Version=${GIT_SHA}" -o /out/scriberr cmd/server/main.go
 # Build CLI binaries (cross-platform)
 RUN mkdir -p /out/bin/cli \
   && GOOS=linux GOARCH=amd64 go build -o /out/bin/cli/scriberr-linux-amd64 ./cmd/scriberr-cli \
@@ -77,7 +79,9 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 # Install uv (fast Python package manager) directly to system PATH
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+# Pinned so an upstream uv release cannot change behaviour under us; bump deliberately
+ARG UV_VERSION=0.12.23
+RUN curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh \
   && cp /root/.local/bin/uv /usr/local/bin/uv \
   && chmod 755 /usr/local/bin/uv \
   && uv --version
