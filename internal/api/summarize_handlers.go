@@ -54,7 +54,14 @@ func (h *Handler) Summarize(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gpuBusyMessage})
 		return
 	}
-	defer releaseGPU()
+	// The lock is handed to the follow-up work (title, unload) once the
+	// stream ends, so the response can close without waiting for it.
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			releaseGPU()
+		}
+	}()
 
 	// Reasoning models think only if the template asks for it
 	ctx := c.Request.Context()
@@ -81,8 +88,13 @@ func (h *Handler) Summarize(c *gin.Context) {
 	c.Status(http.StatusOK)             // Start response immediately
 
 	summary, completed := h.processSummarization(c, ctx, req, svc, messages, start)
-	h.afterSummary(ctx, req, svc, summary, completed)
-	unloadAfterSummary(svc, req.Model)
+
+	handedOff = true
+	go func() {
+		defer releaseGPU()
+		h.afterSummary(context.Background(), req, svc, summary, completed)
+		unloadAfterSummary(svc, req.Model)
+	}()
 }
 
 func (h *Handler) processSummarization(c *gin.Context, reqCtx context.Context, req SummarizeRequest, svc llm.Service, messages []llm.ChatMessage, start time.Time) (string, bool) {

@@ -8,6 +8,9 @@ import (
 
 	"scriberr/internal/gpu"
 	"scriberr/internal/llm"
+	"scriberr/internal/models"
+	"scriberr/internal/titles"
+	"scriberr/pkg/clock"
 	"scriberr/pkg/logger"
 )
 
@@ -78,7 +81,44 @@ func (h *Handler) UnloadLocalLLM(ctx context.Context) string {
 	return "unloaded from Ollama to free GPU memory: " + strings.Join(names, ", ")
 }
 
-// afterSummary runs once a summary stream ends, while the model is still
-// loaded and the GPU lock is held. Title and tag suggestions hook in here.
+// afterSummary runs in the background once a summary stream has closed,
+// while the model is still loaded and the GPU lock is held. It asks the same model for a working
+// title and tags, stores them as suggestions, and applies the title when the
+// current one is a placeholder (a file name, "New Recording", empty).
 func (h *Handler) afterSummary(ctx context.Context, req SummarizeRequest, svc llm.Service, summary string, completed bool) {
+	if !completed || strings.TrimSpace(summary) == "" || !envEnabled(titles.EnvSuggest) {
+		return
+	}
+	job, err := h.jobRepo.FindByID(ctx, req.TranscriptionID)
+	if err != nil || job == nil {
+		logger.Warn("Title suggestion skipped: job not found", "job_id", req.TranscriptionID, "error", err)
+		return
+	}
+
+	// Short, deterministic call. Thinking is off regardless of the template:
+	// a title does not benefit from it and it would only add latency.
+	tctx, cancel := context.WithTimeout(llm.WithThinking(context.Background(), false), 90*time.Second)
+	defer cancel()
+	resp, err := svc.ChatCompletion(tctx, req.Model, []llm.ChatMessage{{Role: "user", Content: titles.Prompt(summary)}}, 0.2)
+	if err != nil || resp == nil || len(resp.Choices) == 0 {
+		logger.Warn("Title suggestion failed", "job_id", job.ID, "model", req.Model, "error", err)
+		return
+	}
+	topic, tags, err := titles.ParseSuggestion(resp.Choices[0].Message.Content)
+	if err != nil {
+		logger.Warn("Title suggestion unusable", "job_id", job.ID, "model", req.Model, "error", err)
+		return
+	}
+
+	title := titles.Format(titles.Pattern(), job.CreatedAt.In(clock.Display), topic)
+	current := ""
+	if job.Title != nil {
+		current = *job.Title
+	}
+	apply := titles.IsPlaceholder(current, job.AudioPath)
+	if err := h.summaryRepo.SaveSuggestions(ctx, job.ID, title, models.StringList(tags), apply); err != nil {
+		logger.Warn("Could not save title suggestion", "job_id", job.ID, "error", err)
+		return
+	}
+	logger.Info("Saved title suggestion", "job_id", job.ID, "title", title, "tags", strings.Join(tags, ","), "applied", apply)
 }

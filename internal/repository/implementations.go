@@ -345,6 +345,8 @@ type SummaryRepository interface {
 	SaveSummary(ctx context.Context, summary *models.Summary) error
 	GetLatestSummary(ctx context.Context, transcriptionID string) (*models.Summary, error)
 	DeleteByTranscriptionID(ctx context.Context, transcriptionID string) error
+	ListSummaries(ctx context.Context, transcriptionID string) ([]models.Summary, error)
+	SaveSuggestions(ctx context.Context, jobID, suggestedTitle string, tags models.StringList, applyTitle bool) error
 }
 
 type summaryRepository struct {
@@ -650,4 +652,29 @@ func (r *refreshTokenRepository) Revoke(ctx context.Context, id uint) error {
 
 func (r *refreshTokenRepository) RevokeByHash(ctx context.Context, hash string) error {
 	return r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("hashed = ?", hash).Update("revoked", true).Error
+}
+
+// ListSummaries returns every stored summary for a transcription, newest first.
+func (r *summaryRepository) ListSummaries(ctx context.Context, transcriptionID string) ([]models.Summary, error) {
+	var out []models.Summary
+	err := r.db.WithContext(ctx).
+		Select("id", "transcription_id", "template_id", "model", "content", "created_at", "updated_at").
+		Where("transcription_id = ?", transcriptionID).
+		Order("created_at DESC").
+		Find(&out).Error
+	return out, err
+}
+
+// SaveSuggestions stores the suggested title and tags on a job. With
+// applyTitle the suggestion also replaces the job title. Only these columns
+// are written, so a concurrent update to other fields is not overwritten.
+func (r *summaryRepository) SaveSuggestions(ctx context.Context, jobID, suggestedTitle string, tags models.StringList, applyTitle bool) error {
+	updates := map[string]interface{}{
+		"suggested_title": suggestedTitle,
+		"suggested_tags":  tags,
+	}
+	if applyTitle {
+		updates["title"] = suggestedTitle
+	}
+	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).Updates(updates).Error
 }
