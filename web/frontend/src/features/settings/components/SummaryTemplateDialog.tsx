@@ -184,7 +184,7 @@ Summarize the following transcript into concise bullet points. Focus on key deci
             label="Run automatically for these tags"
             htmlFor="autoTags"
             optional
-            description="Comma-separated. With automatic summaries on, this template also runs on recordings that get one of these tags. Not used for the default template."
+            description="Comma-separated. With automatic summaries on, this template also runs on recordings that get one of these tags. Matches whole words and plurals: therapy also matches couples therapy, relationship matches relationships. Not used for the default template."
           >
             <Input
               id="autoTags"

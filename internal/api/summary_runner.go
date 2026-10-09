@@ -10,6 +10,7 @@ import (
 	"scriberr/internal/gpu"
 	"scriberr/internal/llm"
 	"scriberr/internal/models"
+	"scriberr/internal/titles"
 	"scriberr/pkg/logger"
 )
 
@@ -331,7 +332,7 @@ func (h *Handler) queueTagTemplates(ctx context.Context, jobID, reason string) i
 func matchesAnyTag(want, have []string) bool {
 	for _, w := range want {
 		for _, h := range have {
-			if strings.EqualFold(strings.TrimSpace(w), h) {
+			if titles.TagMatches(w, h) {
 				return true
 			}
 		}

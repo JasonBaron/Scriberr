@@ -89,7 +89,7 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | Change |
 |---|
 | Summarize existing recordings (Settings > Summary): recordings without a summary, with a tag, or all, using the default or any template. Runs in the background one at a time, with progress, cancel and a dry-run count. `POST/GET/DELETE /api/v1/summaries/run` |
-| Tag-linked templates: a template can list tags (for example `therapy`). With automatic summaries on, recordings with one of those tags also get that template's summary after the default one, including when the tag is added later |
+| Tag-linked templates: a template can list tags (for example `therapy`, which also matches `couples therapy` and plurals). With automatic summaries on, recordings with one of those tags also get that template's summary after the default one, including when the tag is added later |
 
 ### Next
 

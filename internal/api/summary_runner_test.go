@@ -42,6 +42,15 @@ func TestMatchesAnyTag(t *testing.T) {
 	if !matchesAnyTag([]string{"Therapy "}, []string{"family", "therapy"}) {
 		t.Error("should match ignoring case and spaces")
 	}
+	if !matchesAnyTag([]string{"relationship"}, []string{"relationships"}) {
+		t.Error("should match singular against plural")
+	}
+	if !matchesAnyTag([]string{"therapy"}, []string{"couples therapy"}) {
+		t.Error("should match a whole word inside a longer tag")
+	}
+	if matchesAnyTag([]string{"art"}, []string{"party"}) || matchesAnyTag([]string{"couples therapy"}, []string{"therapy"}) {
+		t.Error("should not match partial words or a longer phrase")
+	}
 	if matchesAnyTag([]string{"work"}, []string{"family"}) || matchesAnyTag(nil, []string{"x"}) {
 		t.Error("should not match")
 	}

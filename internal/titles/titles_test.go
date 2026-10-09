@@ -101,3 +101,24 @@ func TestCleanUserTags(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+func TestTagMatches(t *testing.T) {
+	cases := []struct {
+		want, tag string
+		ok        bool
+	}{
+		{"therapy", "Couples Therapy", true},
+		{"relationship", "relationships", true},
+		{"family", "families", true},
+		{"couples therapy", "couples therapy", true},
+		{"counseling", "counseling session", true},
+		{"art", "party", false},
+		{"couples therapy", "therapy", false},
+		{"", "therapy", false},
+	}
+	for _, c := range cases {
+		if got := TagMatches(c.want, c.tag); got != c.ok {
+			t.Errorf("TagMatches(%q, %q) = %v", c.want, c.tag, got)
+		}
+	}
+}
