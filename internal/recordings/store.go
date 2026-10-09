@@ -1,6 +1,6 @@
 // Package recordings keeps each recording's files together in one folder:
 //
-//	<root>/<job-id>/
+//	<root>/<upload-date>_<job-id>/   e.g. 2026-10-08_96dbeb14-2e36-...
 //	  audio.<ext>          the uploaded audio (or its converted copy)
 //	  metadata.json        title, tags, brief, dates, hash (copy of the database)
 //	  transcript.json      transcript (copy of the database)
@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ProcessingDir is the subfolder for model output and the job log.
@@ -26,13 +27,83 @@ const ProcessingDir = "processing"
 // disabled: every method is a no-op and paths stay where they are.
 type Store struct {
 	Root string
+	// Loc is the zone for the date in folder names (default UTC).
+	Loc *time.Location
+	// DateOf returns a recording's upload time, for naming a new folder.
+	// When it is nil or the job is unknown (a new upload), now is used.
+	DateOf func(jobID string) (time.Time, bool)
 }
 
 // Enabled reports whether recordings are kept in per-recording folders.
 func (s Store) Enabled() bool { return s.Root != "" }
 
-// Dir is the folder for one recording.
-func (s Store) Dir(jobID string) string { return filepath.Join(s.Root, jobID) }
+// FolderName is the folder name for a recording uploaded at t:
+// <YYYY-MM-DD>_<job-id>, the date in Loc.
+func (s Store) FolderName(jobID string, t time.Time) string {
+	loc := s.Loc
+	if loc == nil {
+		loc = time.UTC
+	}
+	return t.In(loc).Format("2006-01-02") + "_" + jobID
+}
+
+// Dir is the folder for one recording: the existing one if there is one
+// (dated, or plain <job-id> from before dated names), otherwise a new
+// dated name.
+func (s Store) Dir(jobID string) string {
+	if existing := s.existingDir(jobID); existing != "" {
+		return existing
+	}
+	t := time.Now()
+	if s.DateOf != nil {
+		if d, ok := s.DateOf(jobID); ok {
+			t = d
+		}
+	}
+	return filepath.Join(s.Root, s.FolderName(jobID, t))
+}
+
+func (s Store) existingDir(jobID string) string {
+	if !validID(jobID) {
+		return ""
+	}
+	if m, _ := filepath.Glob(filepath.Join(s.Root, "*_"+jobID)); len(m) > 0 {
+		return m[0]
+	}
+	plain := filepath.Join(s.Root, jobID)
+	if st, err := os.Stat(plain); err == nil && st.IsDir() {
+		return plain
+	}
+	return ""
+}
+
+func validID(jobID string) bool {
+	return jobID != "" && jobID != "." && jobID != ".." && !strings.ContainsAny(jobID, "/\\*?[")
+}
+
+// RenameToDated moves a recording's folder from a plain <job-id> name (or
+// a dated name with a different date) to <date>_<job-id> for uploadedAt.
+// It returns the old and new folder; changed is false when nothing moved.
+func (s Store) RenameToDated(jobID string, uploadedAt time.Time) (oldDir, newDir string, changed bool, err error) {
+	if !s.Enabled() || !validID(jobID) {
+		return "", "", false, nil
+	}
+	oldDir = s.existingDir(jobID)
+	newDir = filepath.Join(s.Root, s.FolderName(jobID, uploadedAt))
+	if oldDir == "" || oldDir == newDir {
+		return oldDir, newDir, false, nil
+	}
+	if _, err := os.Stat(newDir); err == nil {
+		return oldDir, newDir, false, fmt.Errorf("%s already exists", newDir)
+	}
+	if err := os.Rename(oldDir, newDir); err != nil {
+		if isCrossDevice(err) {
+			return oldDir, newDir, false, ErrCrossDevice
+		}
+		return oldDir, newDir, false, err
+	}
+	return oldDir, newDir, true, nil
+}
 
 // ProcessingPath is where model output and the job log go for a recording.
 func (s Store) ProcessingPath(jobID string) string {
@@ -188,8 +259,11 @@ func (s Store) SyncDir(jobID, dir string, files map[string][]byte) error {
 
 // Remove deletes a recording's folder.
 func (s Store) Remove(jobID string) error {
-	if !s.Enabled() || jobID == "" || strings.ContainsAny(jobID, `/\`) || jobID == "." || jobID == ".." {
+	if !s.Enabled() {
 		return nil
 	}
-	return os.RemoveAll(s.Dir(jobID))
+	if dir := s.existingDir(jobID); dir != "" {
+		return os.RemoveAll(dir)
+	}
+	return nil
 }

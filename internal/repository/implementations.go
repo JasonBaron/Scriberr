@@ -231,11 +231,11 @@ func (r *jobRepository) SetAudioPath(ctx context.Context, jobID, path string) er
 		Update("audio_path", path).Error
 }
 
-// ListStorageInfo returns every job's ID, audio path and multi-track flag,
-// without the heavy transcript columns.
+// ListStorageInfo returns every job's ID, audio path, multi-track flag and
+// creation time, without the heavy transcript columns.
 func (r *jobRepository) ListStorageInfo(ctx context.Context) ([]models.TranscriptionJob, error) {
 	var jobs []models.TranscriptionJob
-	err := r.db.WithContext(ctx).Select("id", "audio_path", "is_multi_track").Order("created_at ASC").Find(&jobs).Error
+	err := r.db.WithContext(ctx).Select("id", "audio_path", "is_multi_track", "created_at").Order("created_at ASC").Find(&jobs).Error
 	return jobs, err
 }
 

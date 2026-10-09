@@ -85,7 +85,7 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 |---|
 | SHA-256 of every upload stored; uploading a file that is already in Scriberr warns and names the earlier recording. Existing recordings are hashed in the background on first start |
 | File Info in the job menu: original name, format, codec, duration, sample rate, channels, bit rate, recorded and upload dates, SHA-256 with links to recordings of the same file, and every embedded tag |
-| One folder per recording (`data/recordings/<job-id>/`): audio, `metadata.json`, `transcript.json`, `summaries/*.md`, and `processing/` (model output, job log). Existing recordings are moved there on first start |
+| One folder per recording (`data/recordings/<upload-date>_<job-id>/`): audio, `metadata.json`, `transcript.json`, `summaries/*.md`, and `processing/` (model output, job log). Existing recordings are moved there on first start |
 
 ### Next
 
@@ -187,10 +187,10 @@ While a local (Ollama) summary or chat holds the GPU, a new transcription waits 
 
 ## Recording folders
 
-Each recording has its own folder:
+Each recording has its own folder, named `<upload date>_<job-id>` (the date in `TZ`). The upload date never changes, so neither does the folder:
 
 ```
-data/recordings/<job-id>/
+data/recordings/2026-10-08_96dbeb14-2e36-4dbc-b7c4-1c588bd58cc6/
   audio.m4a            the uploaded audio (or the converted copy for WebM and video uploads)
   metadata.json        title, tags, brief, recorded and upload dates, SHA-256, original name
   transcript.json      the transcript

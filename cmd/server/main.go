@@ -167,6 +167,13 @@ func main() {
 	// One folder per recording, unless the legacy layout is requested or the
 	// folders would be on a different filesystem (moves must be renames).
 	if store := recordingsStore(cfg); store.Enabled() {
+		store.DateOf = func(jobID string) (time.Time, bool) {
+			job, err := jobRepo.FindByID(context.Background(), jobID)
+			if err != nil || job == nil {
+				return time.Time{}, false
+			}
+			return job.CreatedAt, true
+		}
 		handler.SetRecordings(store)
 		unifiedProcessor.GetUnifiedService().SetJobDir(store.ProcessingPath)
 		handler.MigrateRecordings(context.Background())
@@ -292,7 +299,11 @@ func recordingsStore(cfg *config.Config) recordings.Store {
 		logger.Info("Using the legacy file layout (SCRIBERR_RECORDINGS_LAYOUT=legacy)")
 		return recordings.Store{}
 	}
-	store := recordings.Store{Root: cfg.RecordingsDir}
+	root, err := filepath.Abs(cfg.RecordingsDir)
+	if err != nil {
+		root = cfg.RecordingsDir
+	}
+	store := recordings.Store{Root: root, Loc: clock.Display}
 	for _, dir := range []string{cfg.UploadDir, cfg.TranscriptsDir} {
 		if err := store.CheckSameDevice(dir); err != nil {
 			logger.Warn("Recording folders disabled: files cannot be moved into them; keeping the legacy layout",

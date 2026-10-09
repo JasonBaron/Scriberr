@@ -130,6 +130,33 @@ func (h *Handler) MigrateRecordings(ctx context.Context) {
 		}
 		changed := false
 
+		// Folder name: <upload date>_<job-id> (plain <job-id> folders from the
+		// first version of this layout are renamed)
+		if oldDir, newDir, renamed, err := h.recordings.RenameToDated(j.ID, j.CreatedAt); err != nil {
+			failed++
+			note("FAIL %s rename folder: %v", j.ID, err)
+		} else if renamed {
+			changed = true
+			note("renamed %s %s -> %s", j.ID, oldDir, newDir)
+			if strings.HasPrefix(absPath(j.AudioPath), absPath(oldDir)+string(os.PathSeparator)) {
+				p := filepath.Join(newDir, strings.TrimPrefix(absPath(j.AudioPath), absPath(oldDir)+string(os.PathSeparator)))
+				if err := h.jobRepo.SetAudioPath(ctx, j.ID, p); err == nil {
+					j.AudioPath = p
+				} else {
+					failed++
+					note("FAIL %s database update after rename: %v", j.ID, err)
+				}
+			}
+		}
+
+		// Stored paths are absolute so they do not depend on the working folder
+		if h.recordings.Contains(j.AudioPath) && !filepath.IsAbs(j.AudioPath) {
+			if p := absPath(j.AudioPath); h.jobRepo.SetAudioPath(ctx, j.ID, p) == nil {
+				j.AudioPath = p
+				changed = true
+			}
+		}
+
 		// Model output and job log
 		legacy := filepath.Join(h.config.TranscriptsDir, j.ID)
 		if n, err := recordings.MoveContents(legacy, h.recordings.ProcessingPath(j.ID)); err != nil {
@@ -198,4 +225,11 @@ func (h *Handler) MigrateRecordings(ctx context.Context) {
 			"folders_written", mirrored, "failed", failed, "duration", time.Since(start).Round(time.Millisecond),
 			"log", filepath.Join(h.recordings.Root, "migration.log"))
 	}
+}
+
+func absPath(p string) string {
+	if a, err := filepath.Abs(p); err == nil {
+		return a
+	}
+	return p
 }

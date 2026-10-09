@@ -13,7 +13,9 @@ import (
 
 func TestAdoptAndContains(t *testing.T) {
 	base := t.TempDir()
-	s := Store{Root: filepath.Join(base, "recordings")}
+	uploaded := time.Date(2026, 10, 8, 23, 30, 0, 0, time.UTC) // Oct 8 evening in New York, Oct 9 in UTC
+	ny, _ := time.LoadLocation("America/New_York")
+	s := Store{Root: filepath.Join(base, "recordings"), Loc: ny, DateOf: func(string) (time.Time, bool) { return uploaded, true }}
 	uploads := filepath.Join(base, "uploads")
 	if err := s.CheckSameDevice(uploads); err != nil {
 		t.Fatal(err)
@@ -26,7 +28,7 @@ func TestAdoptAndContains(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != filepath.Join(s.Root, "job1", "audio.m4a") {
+	if got != filepath.Join(s.Root, "2026-10-08_job1", "audio.m4a") {
 		t.Errorf("path = %s", got)
 	}
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
@@ -110,5 +112,29 @@ func TestMirror(t *testing.T) {
 	}
 	if !strings.Contains(string(top["transcript.json"]), `"text": "hi"`) {
 		t.Errorf("transcript = %s", top["transcript.json"])
+	}
+}
+
+func TestRenameToDated(t *testing.T) {
+	s := Store{Root: t.TempDir()}
+	plain := filepath.Join(s.Root, "job1")
+	_ = os.MkdirAll(plain, 0o755)
+	_ = os.WriteFile(filepath.Join(plain, "audio.wav"), []byte("a"), 0o600)
+	if s.Dir("job1") != plain {
+		t.Fatalf("existing plain folder should be found, got %s", s.Dir("job1"))
+	}
+	up := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	oldDir, newDir, changed, err := s.RenameToDated("job1", up)
+	if err != nil || !changed || oldDir != plain || newDir != filepath.Join(s.Root, "2026-10-06_job1") {
+		t.Fatalf("rename: %s %s %v %v", oldDir, newDir, changed, err)
+	}
+	if s.Dir("job1") != newDir {
+		t.Errorf("Dir after rename = %s", s.Dir("job1"))
+	}
+	if _, _, changed, _ := s.RenameToDated("job1", up); changed {
+		t.Error("second rename should do nothing")
+	}
+	if s.Dir("../etc") == "" {
+		t.Error("Dir should still return a path for odd IDs")
 	}
 }
