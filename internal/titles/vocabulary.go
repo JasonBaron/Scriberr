@@ -206,7 +206,7 @@ func (v Vocabulary) sensitive(tag string) bool {
 
 // Keywords are free-form tags next to the fixed type and topics.
 const (
-	DefaultKeywords  = 3
+	DefaultKeywords  = 2
 	MaxKeywords      = 5
 	maxKnownKeywords = 40
 )
