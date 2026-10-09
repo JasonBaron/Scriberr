@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,7 +36,15 @@ const SpeakerRenameDialog: React.FC<SpeakerRenameDialogProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The parent re-renders many times a second during playback and passes a
+  // new array each time. Compare speakers by value so the dialog does not
+  // refetch (and wipe what is being typed) on every render.
+  const speakersKey = initialSpeakers.join('\u0000');
+  const speakersRef = useRef(initialSpeakers);
+  speakersRef.current = initialSpeakers;
+
   const fetchSpeakerMappings = useCallback(async () => {
+    const initialSpeakers = speakersRef.current;
     setIsLoading(true);
     setError(null);
 
@@ -80,14 +88,15 @@ const SpeakerRenameDialog: React.FC<SpeakerRenameDialogProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [transcriptionId, getAuthHeaders, initialSpeakers]);
+  }, [transcriptionId, getAuthHeaders]);
 
-  // Initialize speaker mappings when dialog opens
+  // Load mappings once each time the dialog opens (or the speakers change)
   useEffect(() => {
     if (open && transcriptionId) {
       fetchSpeakerMappings();
     }
-  }, [open, transcriptionId, fetchSpeakerMappings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, transcriptionId, speakersKey]);
 
   const handleSpeakerNameChange = (originalSpeaker: string, customName: string) => {
     setSpeakerMappings(prev => ({

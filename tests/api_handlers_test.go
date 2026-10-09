@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"scriberr/internal/models"
 	"scriberr/internal/processing"
 	"scriberr/internal/queue"
+	"scriberr/internal/recordings"
 	"scriberr/internal/repository"
 	"scriberr/internal/service"
 	"scriberr/internal/sse"
@@ -684,6 +687,150 @@ func (suite *APIHandlerTestSuite) TestTranscriptionSubmit() {
 	assert.NotEmpty(suite.T(), response.ID)
 	assert.Equal(suite.T(), "API Handler Test Audio", *response.Title)
 	assert.Equal(suite.T(), models.StatusPending, response.Status)
+}
+
+// uploadBytes posts data to /transcription/upload and returns the job.
+func (suite *APIHandlerTestSuite) uploadBytes(name string, data []byte) models.TranscriptionJob {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("audio", name)
+	assert.NoError(suite.T(), err)
+	_, _ = part.Write(data)
+	_ = writer.WriteField("title", name)
+	writer.Close()
+
+	req, _ := http.NewRequest("POST", "/api/v1/transcription/upload", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-API-Key", suite.helper.TestAPIKey)
+	w := httptest.NewRecorder()
+	suite.router.ServeHTTP(w, req)
+	assert.Equal(suite.T(), 200, w.Code, w.Body.String())
+
+	var job models.TranscriptionJob
+	assert.NoError(suite.T(), json.Unmarshal(w.Body.Bytes(), &job))
+	return job
+}
+
+// Test that uploads are hashed and repeat uploads are flagged
+func (suite *APIHandlerTestSuite) TestUploadDuplicateDetection() {
+	data := []byte("same audio bytes for duplicate detection")
+	first := suite.uploadBytes("memo.m4a", data)
+	assert.Len(suite.T(), first.FileHash, 64)
+	assert.Equal(suite.T(), int64(len(data)), first.FileSize)
+	assert.Equal(suite.T(), "memo.m4a", first.OriginalFilename)
+	assert.Empty(suite.T(), first.Duplicates)
+
+	second := suite.uploadBytes("memo copy.m4a", data)
+	assert.Equal(suite.T(), first.FileHash, second.FileHash)
+	if assert.Len(suite.T(), second.Duplicates, 1) {
+		assert.Equal(suite.T(), first.ID, second.Duplicates[0].ID)
+	}
+
+	other := suite.uploadBytes("other.m4a", []byte("different bytes"))
+	assert.Empty(suite.T(), other.Duplicates)
+
+	w := suite.makeAuthenticatedRequest("GET", fmt.Sprintf("/api/v1/transcription/%s/file-info", first.ID), nil, false)
+	assert.Equal(suite.T(), 200, w.Code)
+	var info api.FileInfoResponse
+	assert.NoError(suite.T(), json.Unmarshal(w.Body.Bytes(), &info))
+	assert.Equal(suite.T(), first.FileHash, info.SHA256)
+	assert.Equal(suite.T(), "memo.m4a", info.OriginalFilename)
+	assert.True(suite.T(), info.FileExists)
+	if assert.Len(suite.T(), info.Duplicates, 1) {
+		assert.Equal(suite.T(), second.ID, info.Duplicates[0].ID)
+	}
+
+	w = suite.makeAuthenticatedRequest("GET", "/api/v1/transcription/missing/file-info", nil, false)
+	assert.Equal(suite.T(), 404, w.Code)
+}
+
+// Test moving existing recordings into per-recording folders, and that new
+// uploads, logs, summaries and deletes use them
+func (suite *APIHandlerTestSuite) TestRecordingFolders() {
+	t := suite.T()
+	cfg := suite.helper.Config
+	root, _ := filepath.Abs(filepath.Join(filepath.Dir(cfg.UploadDir), "recordings_test"))
+	store := recordings.Store{Root: root}
+	assert.NoError(t, store.CheckSameDevice(cfg.UploadDir))
+	suite.handler.SetRecordings(store)
+	defer func() {
+		suite.handler.SetRecordings(recordings.Store{})
+		os.RemoveAll(root)
+	}()
+	ctx := context.Background()
+
+	// A job in the old layout: uploads/<id>.wav and transcripts/<id>/transcription.log
+	job := suite.helper.CreateTestTranscriptionJob(t, "Legacy recording")
+	legacyAudio := filepath.Join(cfg.UploadDir, job.ID+".wav")
+	assert.NoError(t, os.MkdirAll(cfg.UploadDir, 0o755))
+	assert.NoError(t, os.WriteFile(legacyAudio, []byte("audio"), 0o644))
+	legacyDir := filepath.Join(cfg.TranscriptsDir, job.ID)
+	assert.NoError(t, os.MkdirAll(legacyDir, 0o755))
+	assert.NoError(t, os.WriteFile(filepath.Join(legacyDir, "transcription.log"), []byte("JOB LOG"), 0o644))
+	assert.NoError(t, suite.helper.DB.Model(&models.TranscriptionJob{}).Where("id = ?", job.ID).Update("audio_path", legacyAudio).Error)
+	repo := repository.NewSummaryRepository(suite.helper.DB)
+	assert.NoError(t, repo.SaveSummary(ctx, &models.Summary{TranscriptionID: job.ID, Model: "m", Content: "## Overview\nText"}))
+
+	suite.handler.MigrateRecordings(ctx)
+
+	folder := filepath.Join(root, store.FolderName(job.ID, time.Now()))
+	newAudio := filepath.Join(folder, "audio.wav")
+	_, err := os.Stat(newAudio)
+	assert.NoError(t, err, "audio moved into the recording folder")
+	_, err = os.Stat(legacyAudio)
+	assert.True(t, os.IsNotExist(err), "old audio path is gone")
+	var stored models.TranscriptionJob
+	assert.NoError(t, suite.helper.DB.First(&stored, "id = ?", job.ID).Error)
+	assert.Equal(t, newAudio, stored.AudioPath)
+	_, err = os.Stat(filepath.Join(folder, "metadata.json"))
+	assert.NoError(t, err)
+	sums, _ := os.ReadDir(filepath.Join(folder, "summaries"))
+	assert.Len(t, sums, 1)
+
+	w := suite.makeAuthenticatedRequest("GET", fmt.Sprintf("/api/v1/transcription/%s/logs", job.ID), nil, false)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "JOB LOG")
+
+	// Running it again changes nothing
+	suite.handler.MigrateRecordings(ctx)
+	assert.NoError(t, suite.helper.DB.First(&stored, "id = ?", job.ID).Error)
+	assert.Equal(t, newAudio, stored.AudioPath)
+
+	// New uploads go straight into their folder
+	up := suite.uploadBytes("fresh.m4a", []byte("fresh upload bytes"))
+	assert.Equal(t, filepath.Join(root, store.FolderName(up.ID, time.Now()), "audio.m4a"), up.AudioPath)
+
+	// Export zips the recording
+	w = suite.makeAuthenticatedRequest("GET", fmt.Sprintf("/api/v1/transcription/%s/export", job.ID), nil, false)
+	assert.Equal(t, 200, w.Code)
+	zr, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if assert.NoError(t, err) {
+		names := map[string]bool{}
+		for _, f := range zr.File {
+			names[f.Name] = true
+		}
+		base := filepath.Base(folder)
+		assert.True(t, names[base+"/audio.wav"], "audio in zip: %v", names)
+		assert.True(t, names[base+"/metadata.json"])
+		assert.True(t, names[base+"/transcription.log"])
+	}
+
+	// Deleting a recording removes its folder
+	w = suite.makeAuthenticatedRequest("DELETE", fmt.Sprintf("/api/v1/transcription/%s", job.ID), nil, false)
+	assert.Equal(t, 200, w.Code)
+	_, err = os.Stat(folder)
+	assert.True(t, os.IsNotExist(err), "recording folder removed on delete")
+
+	// A plain <job-id> folder from the first version is renamed to the dated name
+	plainJob := suite.helper.CreateTestTranscriptionJob(t, "Plain folder")
+	plain := filepath.Join(root, plainJob.ID)
+	assert.NoError(t, os.MkdirAll(plain, 0o755))
+	assert.NoError(t, os.WriteFile(filepath.Join(plain, "audio.wav"), []byte("a"), 0o644))
+	assert.NoError(t, suite.helper.DB.Model(&models.TranscriptionJob{}).Where("id = ?", plainJob.ID).Update("audio_path", filepath.Join(plain, "audio.wav")).Error)
+	suite.handler.MigrateRecordings(ctx)
+	var renamed models.TranscriptionJob
+	assert.NoError(t, suite.helper.DB.First(&renamed, "id = ?", plainJob.ID).Error)
+	assert.Equal(t, filepath.Join(root, store.FolderName(plainJob.ID, time.Now()), "audio.wav"), renamed.AudioPath)
 }
 
 // Test error responses for non-existent resources

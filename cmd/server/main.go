@@ -19,6 +19,7 @@ import (
 	"scriberr/internal/gpu"
 	"scriberr/internal/processing"
 	"scriberr/internal/queue"
+	"scriberr/internal/recordings"
 	"scriberr/internal/repository"
 	"scriberr/internal/service"
 	"scriberr/internal/sse"
@@ -163,9 +164,27 @@ func main() {
 		broadcaster,
 	)
 
+	// One folder per recording, unless the legacy layout is requested or the
+	// folders would be on a different filesystem (moves must be renames).
+	if store := recordingsStore(cfg); store.Enabled() {
+		store.DateOf = func(jobID string) (time.Time, bool) {
+			job, err := jobRepo.FindByID(context.Background(), jobID)
+			if err != nil || job == nil {
+				return time.Time{}, false
+			}
+			return job.CreatedAt, true
+		}
+		handler.SetRecordings(store)
+		unifiedProcessor.GetUnifiedService().SetJobDir(store.ProcessingPath)
+		handler.MigrateRecordings(context.Background())
+		queue.OnJobCompleted(handler.SyncRecordingAsync)
+	}
+
 	// Free Ollama's GPU memory before each transcription
 	gpu.OnBeforeTranscription(handler.UnloadLocalLLM)
+	handler.ResetSummaryStatuses(context.Background())
 	queue.OnJobCompleted(handler.AutoSummarize)
+	go handler.BackfillFileHashes(context.Background())
 
 	// Set up router. Until model environments are ready, /health reports
 	// "starting" and API writes return 503 (see internal/api/startup.go).
@@ -270,4 +289,27 @@ func registerAdapters(cfg *config.Config) {
 		adapters.NewSortformerAdapter(nvidiaEnvPath)) // Shares with Parakeet
 
 	logger.Info("Adapter registration complete")
+}
+
+// recordingsStore returns the per-recording folder store, or a disabled one
+// when SCRIBERR_RECORDINGS_LAYOUT=legacy or when files cannot be renamed
+// from the upload and transcripts folders into it.
+func recordingsStore(cfg *config.Config) recordings.Store {
+	if cfg.RecordingsLayout == "legacy" {
+		logger.Info("Using the legacy file layout (SCRIBERR_RECORDINGS_LAYOUT=legacy)")
+		return recordings.Store{}
+	}
+	root, err := filepath.Abs(cfg.RecordingsDir)
+	if err != nil {
+		root = cfg.RecordingsDir
+	}
+	store := recordings.Store{Root: root, Loc: clock.Display}
+	for _, dir := range []string{cfg.UploadDir, cfg.TranscriptsDir} {
+		if err := store.CheckSameDevice(dir); err != nil {
+			logger.Warn("Recording folders disabled: files cannot be moved into them; keeping the legacy layout",
+				"recordings_dir", cfg.RecordingsDir, "from", dir, "error", err)
+			return recordings.Store{}
+		}
+	}
+	return store
 }

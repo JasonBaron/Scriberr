@@ -28,6 +28,12 @@ type Config struct {
 	UploadDir      string
 	TranscriptsDir string
 	TempDir        string
+	// RecordingsDir holds one folder per recording (audio, copies of the
+	// transcript, summaries and metadata, model output and job log).
+	RecordingsDir string
+	// RecordingsLayout "legacy" keeps the old uploads/ and transcripts/
+	// layout and skips the move to RecordingsDir.
+	RecordingsLayout string
 
 	// Python/WhisperX configuration
 	WhisperXEnv string
@@ -61,20 +67,22 @@ func Load() *Config {
 	}
 
 	return &Config{
-		Port:           getEnv("PORT", "8080"),
-		Host:           getEnv("HOST", "0.0.0.0"),
-		Environment:    getEnv("APP_ENV", "development"),
-		AllowedOrigins: strings.Split(getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:8080"), ","),
-		DatabasePath:   getEnv("DATABASE_PATH", "data/scriberr.db"),
-		JWTSecret:      getJWTSecret(),
-		UploadDir:      getEnv("UPLOAD_DIR", "data/uploads"),
-		TranscriptsDir: getEnv("TRANSCRIPTS_DIR", "data/transcripts"),
-		TempDir:        getEnv("TEMP_DIR", "data/temp"),
-		WhisperXEnv:    getEnv("WHISPERX_ENV", "data/whisperx-env"),
-		SecureCookies:  getEnv("SECURE_COOKIES", defaultSecure) == "true",
-		OpenAIAPIKey:   getEnv("OPENAI_API_KEY", ""),
-		HFToken:        getEnv("HF_TOKEN", ""),
-		EnabledModels:  parseList(getEnv("SCRIBERR_ENABLED_MODELS", "")),
+		Port:             getEnv("PORT", "8080"),
+		Host:             getEnv("HOST", "0.0.0.0"),
+		Environment:      getEnv("APP_ENV", "development"),
+		AllowedOrigins:   strings.Split(getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:8080"), ","),
+		DatabasePath:     getEnv("DATABASE_PATH", "data/scriberr.db"),
+		JWTSecret:        getJWTSecret(),
+		UploadDir:        getEnv("UPLOAD_DIR", "data/uploads"),
+		TranscriptsDir:   getEnv("TRANSCRIPTS_DIR", "data/transcripts"),
+		TempDir:          getEnv("TEMP_DIR", "data/temp"),
+		RecordingsDir:    getEnv("RECORDINGS_DIR", "data/recordings"),
+		RecordingsLayout: strings.ToLower(strings.TrimSpace(getEnv("SCRIBERR_RECORDINGS_LAYOUT", ""))),
+		WhisperXEnv:      getEnv("WHISPERX_ENV", "data/whisperx-env"),
+		SecureCookies:    getEnv("SECURE_COOKIES", defaultSecure) == "true",
+		OpenAIAPIKey:     getEnv("OPENAI_API_KEY", ""),
+		HFToken:          getEnv("HF_TOKEN", ""),
+		EnabledModels:    parseList(getEnv("SCRIBERR_ENABLED_MODELS", "")),
 	}
 }
 

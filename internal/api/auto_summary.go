@@ -110,6 +110,10 @@ func (h *Handler) AutoSummarize(jobID string) {
 		return
 	}
 
+	// Show the pending summary in the UI until this returns.
+	h.setSummaryStatus(jobID, models.SummaryQueued)
+	defer h.setSummaryStatus(jobID, "")
+
 	// Local models share the GPU with transcription: wait our turn.
 	release := func() {}
 	if _, local := svc.(*llm.OllamaService); local {
@@ -124,6 +128,7 @@ func (h *Handler) AutoSummarize(jobID string) {
 	}
 	defer release()
 
+	h.setSummaryStatus(jobID, models.SummaryRunning)
 	start := time.Now()
 	logger.Info("Automatic summary started", "job_id", jobID, "template", tpl.Name, "model", tpl.Model)
 	sctx, cancel := context.WithTimeout(llm.WithThinking(ctx, tpl.Reasoning), autoSummaryTimeout)
@@ -142,4 +147,18 @@ func (h *Handler) AutoSummarize(jobID string) {
 
 	h.afterSummary(ctx, req, svc, summary, summary != "")
 	unloadAfterSummary(svc, tpl.Model)
+	h.SyncRecording(ctx, jobID)
+}
+
+func (h *Handler) setSummaryStatus(jobID, status string) {
+	if err := h.summaryRepo.SetSummaryStatus(context.Background(), jobID, status); err != nil {
+		logger.Warn("Could not update summary status", "job_id", jobID, "error", err)
+	}
+}
+
+// ResetSummaryStatuses clears automatic summaries that a restart cut short.
+func (h *Handler) ResetSummaryStatuses(ctx context.Context) {
+	if n, err := h.summaryRepo.ClearSummaryStatuses(ctx); err == nil && n > 0 {
+		logger.Info("Cleared interrupted automatic summaries", "count", n)
+	}
 }

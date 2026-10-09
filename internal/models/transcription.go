@@ -21,8 +21,13 @@ type TranscriptionJob struct {
 	Tags                  StringList     `json:"tags,omitempty" gorm:"type:text"`                      // shown and searchable; generated until edited by hand
 	TagsEdited            bool           `json:"tags_edited" gorm:"default:false"`                     // true once the user changed the tags
 	SummaryBrief          *string        `json:"summary_brief,omitempty" gorm:"type:text"`             // one-sentence summary for the list
+	SummaryStatus         string         `json:"summary_status,omitempty" gorm:"type:varchar(20)"`     // automatic summary: queued, running, or empty
 	RecordedAt            *time.Time     `json:"recorded_at,omitempty"`                                // from file metadata or the file's modified time; nil if unknown
 	RecordedAtSource      string         `json:"recorded_at_source,omitempty" gorm:"type:varchar(20)"` // metadata or file
+	FileHash              string         `json:"file_hash,omitempty" gorm:"type:varchar(64);index"`    // SHA-256 of the uploaded file
+	FileSize              int64          `json:"file_size,omitempty"`                                  // bytes, as uploaded
+	OriginalFilename      string         `json:"original_filename,omitempty" gorm:"type:text"`         // name of the uploaded file
+	Duplicates            []DuplicateRef `json:"duplicates,omitempty" gorm:"-"`                        // set on upload responses only
 	ErrorMessage          *string        `json:"error_message,omitempty" gorm:"type:text"`
 	IsMultiTrack          bool           `json:"is_multi_track" gorm:"type:boolean;default:false"`
 	AupFilePath           *string        `json:"aup_file_path,omitempty" gorm:"type:text"`
@@ -399,4 +404,17 @@ type MultiTrackFile struct {
 
 	// Relationships
 	TranscriptionJob TranscriptionJob `json:"transcription_job,omitempty" gorm:"foreignKey:TranscriptionJobID;constraint:OnDelete:CASCADE"`
+}
+
+// Automatic summary states shown while one is pending.
+const (
+	SummaryQueued  = "queued"  // waiting for the GPU
+	SummaryRunning = "running" // the model is writing it
+)
+
+// DuplicateRef points at another recording with the same file hash.
+type DuplicateRef struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
 }

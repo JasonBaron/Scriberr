@@ -128,7 +128,8 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 				uploadRoutes.POST("/upload", handler.UploadAudio)
 				uploadRoutes.POST("/upload-video", handler.UploadVideo)
 				uploadRoutes.POST("/upload-multitrack", handler.UploadMultiTrack)
-				uploadRoutes.GET("/:id/audio", handler.GetAudioFile) // Audio streaming shouldn't be compressed
+				uploadRoutes.GET("/:id/audio", handler.GetAudioFile)     // Audio streaming shouldn't be compressed
+				uploadRoutes.GET("/:id/export", handler.ExportRecording) // zip, already compressed
 			}
 
 			// Regular API routes with compression
@@ -147,6 +148,7 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 			transcription.GET("/:id/summary", handler.GetSummaryForTranscription)
 			transcription.GET("/:id/summaries", handler.ListSummariesForTranscription)
 			transcription.PUT("/:id/tags", handler.UpdateTranscriptionTags)
+			transcription.GET("/:id/file-info", handler.GetFileInfo)
 			transcription.GET("/:id", handler.GetTranscriptionJob)
 			transcription.DELETE("/:id", handler.DeleteTranscriptionJob)
 			transcription.GET("/list", handler.ListTranscriptionJobs)

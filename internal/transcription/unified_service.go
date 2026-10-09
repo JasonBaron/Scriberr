@@ -48,8 +48,9 @@ type UnifiedTranscriptionService struct {
 	postprocessors        map[string]interfaces.Postprocessor
 	tempDirectory         string
 	outputDirectory       string
-	defaultModelIDs       map[string]string      // Default model IDs for each task type
-	multiTrackTranscriber *MultiTrackTranscriber // For termination support
+	jobDir                func(jobID string) string // nil: outputDirectory/<id>
+	defaultModelIDs       map[string]string         // Default model IDs for each task type
+	multiTrackTranscriber *MultiTrackTranscriber    // For termination support
 	jobRepo               repository.JobRepository
 	webhookService        *webhook.Service
 	broadcaster           *sse.Broadcaster
@@ -129,6 +130,19 @@ func (u *UnifiedTranscriptionService) emitPipelineUpdate(
 	})
 }
 
+// SetJobDir sets where each job's model output and log go. Used to place
+// them in the recording's own folder.
+func (u *UnifiedTranscriptionService) SetJobDir(fn func(jobID string) string) {
+	u.jobDir = fn
+}
+
+func (u *UnifiedTranscriptionService) jobOutputDir(jobID string) string {
+	if u.jobDir != nil {
+		return u.jobDir(jobID)
+	}
+	return filepath.Join(u.outputDirectory, jobID)
+}
+
 // Initialize prepares all registered models for use
 func (u *UnifiedTranscriptionService) Initialize(ctx context.Context) error {
 	logger.Info("Initializing unified transcription service")
@@ -181,7 +195,7 @@ func (u *UnifiedTranscriptionService) ProcessJob(ctx context.Context, jobID stri
 	u.emitPipelineUpdate(ctx, execution, models.StageQueued, 0, "Job accepted by worker", nil)
 
 	// Structured, human-readable job log (served by View Logs)
-	jl := joblog.Open(filepath.Join(u.outputDirectory, jobID), jobID)
+	jl := joblog.Open(u.jobOutputDir(jobID), jobID)
 	jl.Header(
 		joblog.Field{Key: "Title", Value: strOr(job.Title, "")},
 		joblog.Field{Key: "Audio", Value: audioSummary(job.AudioPath)},
@@ -309,7 +323,7 @@ func (u *UnifiedTranscriptionService) processSingleTrackJob(
 	// Create processing context
 	procCtx := interfaces.ProcessingContext{
 		JobID:           job.ID,
-		OutputDirectory: filepath.Join(u.outputDirectory, job.ID),
+		OutputDirectory: u.jobOutputDir(job.ID),
 		TempDirectory:   u.tempDirectory,
 		Metadata:        map[string]string{},
 	}

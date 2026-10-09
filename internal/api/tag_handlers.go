@@ -65,5 +65,6 @@ func (h *Handler) UpdateTranscriptionTags(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update tags"})
 		return
 	}
+	h.SyncRecordingAsync(c.Param("id"))
 	c.JSON(http.StatusOK, gin.H{"id": c.Param("id"), "tags": tags})
 }

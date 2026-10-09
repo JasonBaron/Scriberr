@@ -79,12 +79,21 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | | Optional automatic summary after each transcription (Settings > Summary), using the default template; waits for the GPU with a local model |
 | | Recorded date read from file metadata (QuickTime/MP4 `creation_time`, WAV/BWF dates), else the file's modified time; used in the list, the job page and suggested titles |
 
+### In progress (fork-features-2)
+
+| Change |
+|---|
+| SHA-256 of every upload stored; uploading a file that is already in Scriberr warns and names the earlier recording. Existing recordings are hashed in the background on first start |
+| File Info in the job menu: original name, format, codec, duration, sample rate, channels, bit rate, recorded and upload dates, SHA-256 with links to recordings of the same file, and every embedded tag |
+| One folder per recording (`data/recordings/<upload-date>_<job-id>/`): audio, `metadata.json`, `transcript.json`, `summaries/*.md`, and `processing/` (model output, job log). Existing recordings are moved there on first start |
+| Export (.zip) in the job menu: the recording folder (audio, metadata, transcript, summaries, job log) as one download. `GET /api/v1/transcription/:id/export` |
+
 ### Next
 
 | Item | Notes |
 |---|---|
 | fork-fixes-5: YouTube | Transcripts do not appear after adding a video; Shorts links are not accepted |
-| fork-features-2: recordings as units | Per-recording folders, duplicate upload detection, zip export |
+| fork-features-2: recordings as units | Per-recording folders, zip export |
 | fork-features-3: speakers and tags | Speaker ranges per profile, speaker names in summaries, real tags (from the suggestions) with filtering, template chosen by tag or profile |
 | Progress and ETA | Per-model estimates from measured real-time factors |
 | Metrics | Processing time, model and RTF per job in the UI |
@@ -169,11 +178,30 @@ Upstream settings (`HOST`, `PORT`, `DATABASE_PATH`, `ALLOWED_ORIGINS`, `SECURE_C
 | `SCRIBERR_UNLOAD_LLM_AFTER_SUMMARY` | `true` | Unload the summary model when the summary and title are done |
 | `SCRIBERR_SUGGEST_TITLES` | `true` | Suggest a title and tags after each summary |
 | `SCRIBERR_TITLE_FORMAT` | `{date} {topic}` | Pattern for suggested titles; `{date}` is the recorded date (upload date if unknown), YYYY-MM-DD in `TZ` |
+| `RECORDINGS_DIR` | `data/recordings` | One folder per recording. Must be on the same filesystem as `data/uploads` and `data/transcripts` (files are moved by rename) |
+| `SCRIBERR_RECORDINGS_LAYOUT` | | `legacy` keeps the upstream `uploads/` + `transcripts/` layout and skips the move |
 | `SCRIBERR_FIX_OWNERSHIP` | `false` | Force a full `chown` of `/app/data` and `/app/whisperx-env` on start (otherwise only when the top-level owner is wrong) |
 
 For summaries and chat with Ollama, use Scriberr's **Ollama** provider. The OpenAI-compatible provider cannot pass `num_ctx`, so long transcripts get truncated there.
 
 While a local (Ollama) summary or chat holds the GPU, a new transcription waits for it. While a transcription runs, summary and chat requests return 503 "GPU is busy" instead of competing for VRAM. Remote providers are not affected.
+
+## Recording folders
+
+Each recording has its own folder, named `<upload date>_<job-id>` (the date in `TZ`). The upload date never changes, so neither does the folder:
+
+```
+data/recordings/2026-10-08_96dbeb14-2e36-4dbc-b7c4-1c588bd58cc6/
+  audio.m4a            the uploaded audio (or the converted copy for WebM and video uploads)
+  metadata.json        title, tags, brief, recorded and upload dates, SHA-256, original name
+  transcript.json      the transcript
+  summaries/           every saved summary as Markdown, named <date>_<time>_<template>_<id>.md
+  processing/          model output and transcription.log
+```
+
+The database is the source of truth. `metadata.json`, `transcript.json` and `summaries/` are copies, rewritten whenever the recording changes; editing them has no effect. Deleting a recording deletes its folder. Multi-track recordings keep their audio in their upload folder.
+
+On the first start with this layout, existing recordings are moved from `data/uploads/` and `data/transcripts/` by rename (no copying), each job's path is updated as it goes, and every move is written to `data/recordings/migration.log`. An interrupted run picks up where it stopped. If the folders are on different filesystems the move is skipped and the legacy layout stays in use.
 
 ## Job logs
 
