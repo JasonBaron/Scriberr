@@ -14,15 +14,17 @@ interface Settings {
   tag_types: string;
   tag_topics: string;
   tag_synonyms: string;
+  tag_name_hints: string;
   default_tag_types: string;
   default_tag_topics: string;
   default_tag_synonyms: string;
+  default_tag_name_hints: string;
   tag_keywords: number;
   type_count: number;
   topic_count: number;
 }
 
-type ListKey = "tag_types" | "tag_topics" | "tag_synonyms";
+type ListKey = "tag_types" | "tag_topics" | "tag_synonyms" | "tag_name_hints";
 
 const lists: { key: ListKey; def: keyof Settings; label: string; help: string; rows: number }[] = [
   {
@@ -37,6 +39,10 @@ const lists: { key: ListKey; def: keyof Settings; label: string; help: string; r
     key: "tag_synonyms", def: "default_tag_synonyms", label: "Synonyms", rows: 6,
     help: "old, other old = tag. Maps the model's wording onto your tags before anything off the list is dropped.",
   },
+  {
+    key: "tag_name_hints", def: "default_tag_name_hints", label: "Recording type from the file name", rows: 6,
+    help: "words, other words = type. When the name you gave the file contains these words, that type wins over the model. The longest match wins (speech therapy beats therapy).",
+  },
 ];
 
 // TagVocabularySettings controls how recordings are tagged: a fixed list of
@@ -46,7 +52,7 @@ export function TagVocabularySettings({ disabled = false }: { disabled?: boolean
   const { getAuthHeaders } = useAuth();
   const queryClient = useQueryClient();
   const [s, setS] = useState<Settings | null>(null);
-  const [draft, setDraft] = useState<Record<ListKey, string>>({ tag_types: "", tag_topics: "", tag_synonyms: "" });
+  const [draft, setDraft] = useState<Record<ListKey, string>>({ tag_types: "", tag_topics: "", tag_synonyms: "", tag_name_hints: "" });
   const [owner, setOwner] = useState("");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -55,7 +61,7 @@ export function TagVocabularySettings({ disabled = false }: { disabled?: boolean
   const apply = (data: Settings) => {
     setS(data);
     setOwner(data.owner_name || "");
-    setDraft({ tag_types: data.tag_types, tag_topics: data.tag_topics, tag_synonyms: data.tag_synonyms });
+    setDraft({ tag_types: data.tag_types, tag_topics: data.tag_topics, tag_synonyms: data.tag_synonyms, tag_name_hints: data.tag_name_hints });
   };
 
   useEffect(() => {

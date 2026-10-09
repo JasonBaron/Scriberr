@@ -60,6 +60,7 @@ type SummarySettingsRequest struct {
 	TagTypes      *string `json:"tag_types"`
 	TagTopics     *string `json:"tag_topics"`
 	TagSynonyms   *string `json:"tag_synonyms"`
+	TagNameHints  *string `json:"tag_name_hints"`
 	// TagKeywords is how many free-form keywords go next to the type and
 	// topics, 0 to 5.
 	TagKeywords *int `json:"tag_keywords"`
@@ -72,16 +73,18 @@ type SummarySettingsResponse struct {
 	RedactPII     bool   `json:"redact_pii"`
 	TagStrict     bool   `json:"tag_strict"`
 	// Effective lists: the saved text, or the built-in default.
-	TagTypes    string `json:"tag_types"`
-	TagTopics   string `json:"tag_topics"`
-	TagSynonyms string `json:"tag_synonyms"`
+	TagTypes     string `json:"tag_types"`
+	TagTopics    string `json:"tag_topics"`
+	TagSynonyms  string `json:"tag_synonyms"`
+	TagNameHints string `json:"tag_name_hints"`
 	// Built-in defaults, for a reset button.
-	DefaultTagTypes    string `json:"default_tag_types"`
-	DefaultTagTopics   string `json:"default_tag_topics"`
-	DefaultTagSynonyms string `json:"default_tag_synonyms"`
-	TagKeywords        int    `json:"tag_keywords"`
-	TypeCount          int    `json:"type_count"`
-	TopicCount         int    `json:"topic_count"`
+	DefaultTagTypes     string `json:"default_tag_types"`
+	DefaultTagTopics    string `json:"default_tag_topics"`
+	DefaultTagSynonyms  string `json:"default_tag_synonyms"`
+	DefaultTagNameHints string `json:"default_tag_name_hints"`
+	TagKeywords         int    `json:"tag_keywords"`
+	TypeCount           int    `json:"type_count"`
+	TopicCount          int    `json:"topic_count"`
 }
 
 func orDefault(saved, def string) string {
@@ -103,20 +106,22 @@ func storedList(text, def string) string {
 func settingsResponse(s *models.SummarySetting) SummarySettingsResponse {
 	voc := titles.NewVocabulary(s.TagTypes, s.TagTopics, s.TagSynonyms)
 	return SummarySettingsResponse{
-		DefaultModel:       s.DefaultModel,
-		AutoSummarize:      s.AutoSummarize,
-		OwnerName:          s.OwnerName,
-		RedactPII:          s.RedactPII == nil || *s.RedactPII,
-		TagStrict:          s.TagStrict == nil || *s.TagStrict,
-		TagTypes:           orDefault(s.TagTypes, titles.DefaultTypes),
-		TagTopics:          orDefault(s.TagTopics, titles.DefaultTopics),
-		TagSynonyms:        orDefault(s.TagSynonyms, titles.DefaultSynonyms),
-		DefaultTagTypes:    titles.DefaultTypes,
-		DefaultTagTopics:   titles.DefaultTopics,
-		DefaultTagSynonyms: titles.DefaultSynonyms,
-		TagKeywords:        keywordCount(s),
-		TypeCount:          len(voc.Types),
-		TopicCount:         len(voc.Topics),
+		DefaultModel:        s.DefaultModel,
+		AutoSummarize:       s.AutoSummarize,
+		OwnerName:           s.OwnerName,
+		RedactPII:           s.RedactPII == nil || *s.RedactPII,
+		TagStrict:           s.TagStrict == nil || *s.TagStrict,
+		TagTypes:            orDefault(s.TagTypes, titles.DefaultTypes),
+		TagTopics:           orDefault(s.TagTopics, titles.DefaultTopics),
+		TagSynonyms:         orDefault(s.TagSynonyms, titles.DefaultSynonyms),
+		TagNameHints:        orDefault(s.TagNameHints, titles.DefaultNameHints),
+		DefaultTagNameHints: titles.DefaultNameHints,
+		DefaultTagTypes:     titles.DefaultTypes,
+		DefaultTagTopics:    titles.DefaultTopics,
+		DefaultTagSynonyms:  titles.DefaultSynonyms,
+		TagKeywords:         keywordCount(s),
+		TypeCount:           len(voc.Types),
+		TopicCount:          len(voc.Topics),
 	}
 }
 
@@ -374,6 +379,9 @@ func (h *Handler) SaveSummarySettings(c *gin.Context) {
 	}
 	if req.TagSynonyms != nil {
 		s.TagSynonyms = storedList(*req.TagSynonyms, titles.DefaultSynonyms)
+	}
+	if req.TagNameHints != nil {
+		s.TagNameHints = storedList(*req.TagNameHints, titles.DefaultNameHints)
 	}
 	s.UpdatedAt = time.Now()
 	if err := h.summaryRepo.SaveSettings(c.Request.Context(), s); err != nil {

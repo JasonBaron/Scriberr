@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // Flag and source tags added by code, never chosen by the model.
@@ -21,8 +22,8 @@ const (
 // "tag: description". A leading ! marks the type as sensitive.
 const DefaultTypes = `!individual therapy: one client with a therapist or counselor
 !couples therapy: two partners together with a therapist or counselor
-!relationship talk: partners talking to each other about their relationship, no therapist present
-conversation: any other talk between family, friends or acquaintances
+!relationship talk: partners talking to each other about their own relationship (needs, trust, conflict, their future), no therapist present
+conversation: any other talk between family, friends, acquaintances or partners, including partners talking about family, plans or daily life
 !medical appointment: a visit or call with a doctor, nurse, specialist or speech, voice or physical therapist
 !advisor meeting: a lawyer, mediator, accountant, financial advisor, realtor or other paid professional
 work meeting: colleagues, clients, vendors or interviews about work
@@ -98,6 +99,70 @@ type Vocabulary struct {
 	Types    []Entry
 	Topics   []Entry
 	Synonyms map[string]string
+	// NameHints maps words in a recording's own name to a type, which then
+	// wins over the model: "therapy session" means individual therapy.
+	NameHints map[string]string
+}
+
+// DefaultNameHints sets the type from words in the name the person gave
+// the file, one rule per line: "words, other words = type". The longest
+// match wins, so "speech therapy" beats "therapy".
+const DefaultNameHints = `couples therapy, couples session, couples counseling, marriage counseling = couples therapy
+therapy, therapy session, therapist, counseling, counselling = individual therapy
+speech therapy, voice therapy, physical therapy, doctor, appointment, neurologist, ent, clinic = medical appointment
+lawyer, attorney, mediator, mediation, accountant, financial advisor = advisor meeting
+meeting, standup, one on one, interview = work meeting
+voice memo, journal, note to self = personal note`
+
+// WithNameHints sets the name hints from settings text; empty means the
+// default.
+func (v Vocabulary) WithNameHints(text string) Vocabulary {
+	if strings.TrimSpace(text) == "" {
+		text = DefaultNameHints
+	}
+	v.NameHints = map[string]string{}
+	for phrase, typ := range ParseSynonyms(text) {
+		if t := v.ResolveType(typ); t != "" {
+			v.NameHints[phrase] = t
+		}
+	}
+	return v
+}
+
+func nameWords(s string) []string {
+	return strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return unicode.ToLower(r)
+		}
+		return ' '
+	}, s))
+}
+
+// TypeFromName returns the type the recording's own name points to, or "".
+// Words match whole, ignoring case, punctuation and plurals; the longest
+// matching phrase wins.
+func (v Vocabulary) TypeFromName(name string) string {
+	words := nameWords(name)
+	best, bestLen := "", 0
+	for phrase, typ := range v.NameHints {
+		p := nameWords(phrase)
+		if len(p) == 0 || len(p) > len(words) {
+			continue
+		}
+		for i := 0; i+len(p) <= len(words); i++ {
+			ok := true
+			for j := range p {
+				if !sameWord(p[j], words[i+j]) {
+					ok = false
+					break
+				}
+			}
+			if ok && (len(phrase) > bestLen || (len(phrase) == bestLen && typ < best)) {
+				best, bestLen = typ, len(phrase)
+			}
+		}
+	}
+	return best
 }
 
 // ParseEntries reads "[!]tag: description" lines. Blank lines and lines
@@ -235,7 +300,7 @@ type: exactly one recording type from the list below, spelled exactly as shown. 
 topics: 2 or 3 topics from the list below, spelled exactly as shown, most important first. Use only 1 when the recording is very short or about a single thing. Only main subjects, not passing mentions. Never invent a topic.
 `)
 	if keywords > 0 {
-		b.WriteString(fmt.Sprintf(`keywords: 1 to %d specific lowercase tags of 1 or 2 words for concrete details the lists do not cover: a named condition, medication, test or procedure, a practice or method, an event, a project, a place or an object that matters. Concrete nouns only. Never feelings, moods, behaviors or traits (not "uncertainty", "defensive", "resilience"): the topics and summary cover those. Not a recording type or topic, not a person's name, not a date or number, and no diagnosis nobody stated. Use none when nothing concrete stands out.
+		b.WriteString(fmt.Sprintf(`keywords: 1 to %d specific lowercase tags of 1 or 2 words for concrete details central to the recording (not passing mentions) that the lists do not cover: a named condition, medication, test or procedure, a practice or method, an event, a project, a place or an object that matters. Concrete nouns only. Never feelings, moods, behaviors or traits (not "uncertainty", "defensive", "resilience"): the topics and summary cover those. Not a recording type or topic, not a person's name, not a date or number, and no diagnosis nobody stated. Use none when nothing concrete stands out.
 `, keywords))
 		if len(known) > maxKnownKeywords {
 			known = known[:maxKnownKeywords]
@@ -355,8 +420,9 @@ func (v Vocabulary) ParseStrict(raw string) (Classified, error) {
 
 // Flags are facts known outside the model.
 type Flags struct {
-	YouTube bool // the audio came from YouTube
-	PII     bool // identifiers found in the transcript
+	YouTube  bool   // the audio came from YouTube
+	PII      bool   // identifiers found in the transcript
+	NameType string // type set by the recording's own name (TypeFromName)
 }
 
 // Assemble builds the tags and the flags. Tags: type, topics, up to
@@ -367,6 +433,9 @@ type Flags struct {
 // media type.
 func (v Vocabulary) Assemble(c Classified, f Flags, keywords int, known []string) (tags, flags []string) {
 	typ := c.Type
+	if f.NameType != "" {
+		typ = f.NameType
+	}
 	if f.YouTube {
 		if t := v.ResolveType(TypeMedia); t != "" {
 			typ = t

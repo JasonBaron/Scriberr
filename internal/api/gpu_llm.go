@@ -134,7 +134,10 @@ func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, s
 	}
 
 	strict := settings.TagStrict == nil || *settings.TagStrict
-	voc := titles.NewVocabulary(settings.TagTypes, settings.TagTopics, settings.TagSynonyms)
+	voc := titles.NewVocabulary(settings.TagTypes, settings.TagTopics, settings.TagSynonyms).WithNameHints(settings.TagNameHints)
+	if own := ownName(job); own != "" && strict {
+		flags.NameType = voc.TypeFromName(own)
+	}
 	keywords := keywordCount(settings)
 	var vocabulary, known []string
 	prompt := ""
@@ -252,6 +255,24 @@ func (h *Handler) MigrateFlags(ctx context.Context) {
 	if n > 0 {
 		logger.Info("Moved sensitive and pii from tags to flags", "recordings", n)
 	}
+}
+
+// ownName is the name the person gave the recording: the uploaded file's
+// name, else a title they set themselves (not one Scriberr suggested).
+func ownName(job *models.TranscriptionJob) string {
+	if strings.TrimSpace(job.OriginalFilename) != "" {
+		return job.OriginalFilename
+	}
+	if job.Title == nil || strings.TrimSpace(*job.Title) == "" {
+		return ""
+	}
+	if job.SuggestedTitle != nil && *job.SuggestedTitle == *job.Title {
+		return ""
+	}
+	if isYouTube(job) {
+		return ""
+	}
+	return *job.Title
 }
 
 // summarySettings returns the saved settings, or defaults.

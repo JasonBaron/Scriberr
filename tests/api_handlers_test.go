@@ -914,6 +914,7 @@ func (suite *APIHandlerTestSuite) TestTaggingSettingsAndLibrary() {
 	assert.Equal(t, st.DefaultTagTypes, st.TagTypes)
 	assert.Equal(t, 9, st.TypeCount)
 	assert.Equal(t, 2, st.TagKeywords, "two free-form keywords by default")
+	assert.Contains(t, st.TagNameHints, "= individual therapy", "name hints default")
 	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{"tag_keywords": 9}, false)
 	assert.Equal(t, 400, w.Code)
 

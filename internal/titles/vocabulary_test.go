@@ -139,3 +139,26 @@ func TestFoldStems(t *testing.T) {
 		t.Errorf("%v", tags)
 	}
 }
+
+func TestTypeFromName(t *testing.T) {
+	v := NewVocabulary("", "", "").WithNameHints("")
+	cases := map[string]string{
+		"20260603 - Therapy Session (Jason) - 13-01-00.m4a":    "individual therapy",
+		"20260520 - Therapy Discussion (Jason) - 13-01-23.m4a": "individual therapy",
+		"Couples Therapy 2026-05-27.m4a":                       "couples therapy",
+		"2026-07-22 Speech Therapy follow-up.m4a":              "medical appointment",
+		"ENT appointment.m4a":                                  "medical appointment",
+		"20260504 - Steph Jason Conversation - 18-53-05.m4a":   "",
+		"BENCH 5m | large-v3 | diarize=True | 20261009-170136": "",
+		"Gentle reminder":                                      "",
+	}
+	for name, want := range cases {
+		if got := v.TypeFromName(name); got != want {
+			t.Errorf("TypeFromName(%q) = %q, want %q", name, got, want)
+		}
+	}
+	tags, _ := v.Assemble(Classified{Type: "relationship talk", Topics: []string{"mental health"}}, Flags{NameType: "individual therapy"}, 2, nil)
+	if tags[0] != "individual therapy" {
+		t.Errorf("name type should win: %v", tags)
+	}
+}
