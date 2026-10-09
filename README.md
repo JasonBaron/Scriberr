@@ -86,6 +86,7 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | SHA-256 of every upload stored; uploading a file that is already in Scriberr warns and names the earlier recording. Existing recordings are hashed in the background on first start |
 | File Info in the job menu: original name, format, codec, duration, sample rate, channels, bit rate, recorded and upload dates, SHA-256 with links to recordings of the same file, and every embedded tag |
 | One folder per recording (`data/recordings/<upload-date>_<job-id>/`): audio, `metadata.json`, `transcript.json`, `summaries/*.md`, and `processing/` (model output, job log). Existing recordings are moved there on first start |
+| Export (.zip) in the job menu: the recording folder (audio, metadata, transcript, summaries, job log) as one download. `GET /api/v1/transcription/:id/export` |
 
 ### Next
 

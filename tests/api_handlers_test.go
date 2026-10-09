@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -798,6 +799,21 @@ func (suite *APIHandlerTestSuite) TestRecordingFolders() {
 	// New uploads go straight into their folder
 	up := suite.uploadBytes("fresh.m4a", []byte("fresh upload bytes"))
 	assert.Equal(t, filepath.Join(root, store.FolderName(up.ID, time.Now()), "audio.m4a"), up.AudioPath)
+
+	// Export zips the recording
+	w = suite.makeAuthenticatedRequest("GET", fmt.Sprintf("/api/v1/transcription/%s/export", job.ID), nil, false)
+	assert.Equal(t, 200, w.Code)
+	zr, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if assert.NoError(t, err) {
+		names := map[string]bool{}
+		for _, f := range zr.File {
+			names[f.Name] = true
+		}
+		base := filepath.Base(folder)
+		assert.True(t, names[base+"/audio.wav"], "audio in zip: %v", names)
+		assert.True(t, names[base+"/metadata.json"])
+		assert.True(t, names[base+"/transcription.log"])
+	}
 
 	// Deleting a recording removes its folder
 	w = suite.makeAuthenticatedRequest("DELETE", fmt.Sprintf("/api/v1/transcription/%s", job.ID), nil, false)

@@ -2,7 +2,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useParams, useNavigate } from "react-router-dom";
-import { MoreVertical, Edit2, Activity, FileText, Bot, Check, Loader2, List, AlignLeft, ArrowDownCircle, StickyNote, MessageCircle, FileImage, FileJson, Clock, AlertCircle, Users, ClipboardCopy, FileAudio } from "lucide-react";
+import { MoreVertical, Edit2, Activity, FileText, Bot, Check, Loader2, List, AlignLeft, ArrowDownCircle, StickyNote, MessageCircle, FileImage, FileJson, Clock, AlertCircle, Users, ClipboardCopy, FileAudio, Archive } from "lucide-react";
 import { Header } from "@/components/Header";
 
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ import { TagEditor } from "./audio-detail/TagEditor";
 import { FileInfoDialog } from "./audio-detail/FileInfoDialog";
 import { ChatSidePanel } from "./ChatSidePanel";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useAuth } from "@/features/auth/hooks/useAuth";
 
 // Types
 interface AudioDetailViewProps {
@@ -39,6 +40,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
     const audioId = propAudioId || paramAudioId;
     const navigate = useNavigate();
     const { toast } = useToast();
+    const { getAuthHeaders } = useAuth();
 
     // Refs
     const audioPlayerRef = useRef<EmberPlayerRef>(null);
@@ -139,6 +141,29 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
     const handleTimeUpdate = useCallback((time: number) => {
         setCurrentTime(time);
     }, []);
+
+    // Download the recording folder as a zip (audio, metadata, transcript,
+    // summaries, job log)
+    const handleExport = async () => {
+        if (!audioId) return;
+        toast({ title: "Preparing export..." });
+        try {
+            const res = await fetch(`/api/v1/transcription/${audioId}/export`, { headers: getAuthHeaders() });
+            if (!res.ok) throw new Error(String(res.status));
+            const blob = await res.blob();
+            const match = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "");
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = match?.[1] || `${audioId}.zip`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        } catch {
+            toast({ title: "Export failed" });
+        }
+    };
 
     const handleTitleSave = () => {
         if (newTitle.trim() !== audioFile?.title) {
@@ -429,6 +454,9 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                                         <FileJson className="mr-2 h-4 w-4 opacity-70" /> Download JSON
                                                     </DropdownMenuItem>
                                                     <DropdownMenuSeparator className="bg-[var(--border-subtle)] my-1" />
+                                                    <DropdownMenuItem onClick={handleExport} className="rounded-[8px] cursor-pointer">
+                                                        <Archive className="mr-2 h-4 w-4 opacity-70" /> Export (.zip)
+                                                    </DropdownMenuItem>
                                                     <DropdownMenuItem onClick={() => setFileInfoOpen(true)} className="rounded-[8px] cursor-pointer">
                                                         <FileAudio className="mr-2 h-4 w-4 opacity-70" /> File Info
                                                     </DropdownMenuItem>
