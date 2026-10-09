@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -29,6 +29,7 @@ export function TemplateLibraryPanel({ disabled = false, onApplied }: { disabled
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [model, setModel] = useState("");
 
   const { data: items = [], refetch } = useQuery({
     queryKey: ["summaryLibrary"],
@@ -39,7 +40,34 @@ export function TemplateLibraryPanel({ disabled = false, onApplied }: { disabled
     enabled: open,
   });
 
+  const { data: models = [] } = useQuery({
+    queryKey: ["chatModels"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/chat/models", { headers: getAuthHeaders() });
+      if (!res.ok) return [] as string[];
+      const data = await res.json();
+      return (data.models || []) as string[];
+    },
+    enabled: open,
+  });
+  const { data: installed = [] } = useQuery({
+    queryKey: ["summaryTemplates"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/summaries", { headers: getAuthHeaders() });
+      return res.ok ? (res.json() as Promise<{ model: string; is_default?: boolean }[]>) : [];
+    },
+    enabled: open,
+  });
+
+  // Preselect the default template's model, else the first available.
+  useEffect(() => {
+    if (model || models.length === 0) return;
+    const fromDefault = installed.find(t => t.is_default)?.model || installed[0]?.model;
+    setModel(fromDefault && models.includes(fromDefault) ? fromDefault : models[0]);
+  }, [models, installed, model]);
+
   const pending = items.filter(i => i.status !== "installed").length;
+  const creating = items.some(i => picked.has(i.name) && i.status === "missing");
 
   const toggle = (name: string, on: boolean) =>
     setPicked(p => {
@@ -55,7 +83,7 @@ export function TemplateLibraryPanel({ disabled = false, onApplied }: { disabled
       const res = await fetch("/api/v1/summaries/library", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ names: [...picked] }),
+        body: JSON.stringify({ names: [...picked], model }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Could not apply");
@@ -111,11 +139,24 @@ export function TemplateLibraryPanel({ disabled = false, onApplied }: { disabled
             ))}
           </ul>
           <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+              Model for new templates
+              <select
+                className="h-9 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] px-2 text-sm text-[var(--text-primary)]"
+                value={model}
+                onChange={e => setModel(e.target.value)}
+                disabled={disabled || models.length === 0}
+                aria-label="Model for new templates"
+              >
+                {models.length === 0 && <option value="">No models found</option>}
+                {models.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </label>
             <Button size="sm" variant="outline" disabled={disabled || busy || pending === 0}
               onClick={() => setPicked(new Set(items.filter(i => i.status !== "installed").map(i => i.name)))}>
               Select all
             </Button>
-            <Button size="sm" disabled={disabled || busy || picked.size === 0} onClick={applyPicked}>
+            <Button size="sm" disabled={disabled || busy || picked.size === 0 || (creating && !model)} onClick={applyPicked}>
               {busy && <Loader2 className="h-4 w-4 animate-spin" />} Install or update {picked.size || ""}
             </Button>
           </div>

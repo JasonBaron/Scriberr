@@ -961,7 +961,20 @@ func (suite *APIHandlerTestSuite) TestTaggingSettingsAndLibrary() {
 	assert.NoError(t, db.First(&med, "name = ?", "Medical Appointment Notes").Error)
 	assert.Equal(t, "qwen3:8b", med.Model, "new templates use the default template's model")
 
+	// With no templates at all, new templates need a model from the request
+	db.Exec("DELETE FROM summary_templates")
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/library", map[string]interface{}{"names": []string{"Default"}}, false)
+	assert.Equal(t, 400, w.Code, "no model anywhere")
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/library", map[string]interface{}{"names": []string{"Default", "Media Notes"}, "model": "llama3"}, false)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), `"created":2`)
+	var newDef models.SummaryTemplate
+	assert.NoError(t, db.First(&newDef, "name = ?", "Default").Error)
+	assert.True(t, newDef.IsDefault, "a new Default becomes the default when there is none")
+	assert.Equal(t, "llama3", newDef.Model)
+
 	// Retag selects summarized recordings and skips hand-edited tags
+	def = &newDef
 	tr := `{"text":"hello"}`
 	a := models.TranscriptionJob{ID: "retag-a", AudioPath: "a.wav", Status: models.StatusCompleted, Transcript: &tr}
 	b := models.TranscriptionJob{ID: "retag-b", AudioPath: "b.wav", Status: models.StatusCompleted, Transcript: &tr, TagsEdited: true}
