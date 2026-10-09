@@ -140,7 +140,11 @@ func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, s
 	prompt := ""
 	if strict {
 		known = h.knownKeywords(ctx, voc)
-		prompt = voc.StrictPrompt(summary, name, keywords, known)
+		opening := ""
+		if job.Transcript != nil {
+			opening = transcriptOpening(*job.Transcript, 2500)
+		}
+		prompt = voc.StrictPrompt(summary, name, opening, keywords, known)
 	} else {
 		vocabulary = h.tagVocabulary(ctx)
 		prompt = titles.Prompt(summary, vocabulary)
@@ -271,6 +275,38 @@ func isYouTube(job *models.TranscriptionJob) bool {
 
 func isYouTubeURL(u string) bool {
 	return strings.Contains(u, "youtube.com") || strings.Contains(u, "youtu.be")
+}
+
+// transcriptOpening returns about the first max characters of a stored
+// transcript, with speaker labels, cut at a line.
+func transcriptOpening(transcriptJSON string, max int) string {
+	var t storedTranscript
+	if err := json.Unmarshal([]byte(transcriptJSON), &t); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, seg := range t.Segments {
+		line := strings.TrimSpace(seg.Text)
+		if seg.Speaker != "" {
+			line = "[" + seg.Speaker + "] " + line
+		}
+		if b.Len()+len(line) > max {
+			break
+		}
+		b.WriteString(line + "\n")
+	}
+	if b.Len() == 0 {
+		text := strings.TrimSpace(t.Text)
+		if len(text) > max {
+			if cut := strings.LastIndex(text[:max], " "); cut > 0 {
+				text = text[:cut]
+			} else {
+				text = text[:max]
+			}
+		}
+		return text
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // transcriptText returns the plain text of a stored transcript.

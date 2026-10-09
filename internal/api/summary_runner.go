@@ -288,6 +288,12 @@ func (h *Handler) runSummaryTask(ctx context.Context, t summaryTask) (SummaryRun
 	logger.Info("Summary started", "job_id", t.JobID, "template", tpl.Name, "model", tpl.Model, "reason", t.Reason)
 	sctx, cancel := context.WithTimeout(llm.WithDeterministic(llm.WithThinking(ctx, tpl.Reasoning)), autoSummaryTimeout)
 	defer cancel()
+	// Long transcripts are turned into notes part by part first, so the
+	// model reads all of it instead of losing the start.
+	content, err = h.condenseLongTranscript(sctx, svc, tpl.Model, content, t.JobID)
+	if err != nil {
+		return fail(err)
+	}
 	resp, err := svc.ChatCompletion(sctx, tpl.Model, []llm.ChatMessage{{Role: "user", Content: content}}, 0.0)
 	if err != nil || resp == nil || len(resp.Choices) == 0 {
 		if err == nil {

@@ -11,6 +11,7 @@ import (
 	"scriberr/internal/llm"
 	"scriberr/internal/models"
 	"scriberr/internal/pii"
+	"scriberr/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -63,6 +64,19 @@ func (h *Handler) Summarize(c *gin.Context) {
 			releaseGPU()
 		}
 	}()
+
+	// A long transcript needs notes written part by part, which takes
+	// minutes; that runs in the background queue instead of holding the
+	// request open, and the summary appears on the page when it is done.
+	if req.TemplateID != nil && *req.TemplateID != "" && isLongTranscript(req.Content) {
+		releaseGPU()
+		handedOff = true
+		h.queueSummaries(summaryTask{JobID: req.TranscriptionID, TemplateID: *req.TemplateID, Force: true, Reason: "long transcript"})
+		logger.Info("Long transcript: summary moved to the background queue", "job_id", req.TranscriptionID, "template_id", *req.TemplateID)
+		c.Header("Content-Type", "text/plain; charset=utf-8")
+		c.String(http.StatusOK, "This recording is long, so the summary is being written in the background: notes on each part first, then the summary. It takes a few minutes and appears in the Summary panel when done (reload the page).")
+		return
+	}
 
 	// Reasoning models think only if the template asks for it
 	ctx := c.Request.Context()

@@ -89,12 +89,15 @@ func TestParseStrictKeywords(t *testing.T) {
 
 func TestPromptKeywords(t *testing.T) {
 	v := NewVocabulary("", "", "")
-	if p := v.StrictPrompt("s", "", 0, nil); strings.Contains(p, "keywords") {
+	if p := v.StrictPrompt("s", "", "", 0, nil); strings.Contains(p, "keywords") {
 		t.Error("no keywords line when disabled")
 	}
-	p := v.StrictPrompt("s", "", 3, []string{"stoicism"})
+	p := v.StrictPrompt("s", "Therapy Session (Jason)", "[S1] How have you been since our last session?", 3, []string{"stoicism"})
 	if !strings.Contains(p, "1 to 3 specific") || !strings.Contains(p, "stoicism") {
 		t.Error("keywords line and known keywords expected")
+	}
+	if !strings.Contains(p, "Therapy Session (Jason)") || !strings.Contains(p, "since our last session") {
+		t.Error("name and transcript opening expected")
 	}
 }
 
@@ -122,5 +125,17 @@ func TestYouTubeTitle(t *testing.T) {
 	}
 	if got := YouTube(d, "YouTube Audio"); got != "2026-10-09 YouTube: Video" {
 		t.Error(got)
+	}
+}
+
+func TestFoldStems(t *testing.T) {
+	got := foldStems([]string{"defensiveness", "defensive", "insularity", "acid reflux"}, []string{"defensive", "insular"})
+	if !reflect.DeepEqual(got, []string{"defensive", "insular", "acid reflux"}) {
+		t.Errorf("%v", got)
+	}
+	v := NewVocabulary("", "", "")
+	tags, _ := v.Assemble(Classified{Type: "conversation", Topics: []string{"family"}, Keywords: []string{"Defensiveness"}}, Flags{}, 2, []string{"defensive"})
+	if !reflect.DeepEqual(tags, []string{"conversation", "family", "defensive"}) {
+		t.Errorf("%v", tags)
 	}
 }

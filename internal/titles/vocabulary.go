@@ -221,7 +221,7 @@ func IsFlag(tag string) bool { return tag == TagSensitive || tag == TagPII }
 // comes from the transcript check only. name is the recording's current
 // title or file name, a useful hint. known lists keywords already in use,
 // most used first, for reuse.
-func (v Vocabulary) StrictPrompt(summary, name string, keywords int, known []string) string {
+func (v Vocabulary) StrictPrompt(summary, name, opening string, keywords int, known []string) string {
 	var b strings.Builder
 	shape := `{"topic": "...", "brief": "...", "type": "...", "topics": ["..."]}`
 	if keywords > 0 {
@@ -231,11 +231,11 @@ func (v Vocabulary) StrictPrompt(summary, name string, keywords int, known []str
 
 topic: 4 to 8 words naming what the recording is specifically about. Title Case. No date, no quotes, no trailing punctuation. Avoid generic words like Recording, Conversation, Discussion, Meeting, Summary.
 brief: one plain sentence of at most 25 words saying what the recording covers, for a list view. Never include a date of birth, ID or account number, phone number, email or address.
-type: exactly one recording type from the list below, spelled exactly as shown. Decide by who is talking and the setting, not by the subject.
+type: exactly one recording type from the list below, spelled exactly as shown. Decide by who is talking and the setting, not by the subject: a therapist or counselor taking part makes it a therapy type even when the subject is a relationship. The recording's name and the opening of the transcript below are the best evidence.
 topics: 2 or 3 topics from the list below, spelled exactly as shown, most important first. Use only 1 when the recording is very short or about a single thing. Only main subjects, not passing mentions. Never invent a topic.
 `)
 	if keywords > 0 {
-		b.WriteString(fmt.Sprintf(`keywords: 1 to %d specific lowercase tags of 1 or 2 words for what makes this recording distinct that the lists do not cover, such as a named condition, a practice, a role, an event or a project. Not a recording type or topic, not a person's name, not a date or number, and no diagnosis nobody stated. Use none for a very short or trivial recording.
+		b.WriteString(fmt.Sprintf(`keywords: 1 to %d specific lowercase tags of 1 or 2 words for concrete details the lists do not cover: a named condition, medication, test or procedure, a practice or method, an event, a project, a place or an object that matters. Concrete nouns only. Never feelings, moods, behaviors or traits (not "uncertainty", "defensive", "resilience"): the topics and summary cover those. Not a recording type or topic, not a person's name, not a date or number, and no diagnosis nobody stated. Use none when nothing concrete stands out.
 `, keywords))
 		if len(known) > maxKnownKeywords {
 			known = known[:maxKnownKeywords]
@@ -253,7 +253,10 @@ topics: 2 or 3 topics from the list below, spelled exactly as shown, most import
 		b.WriteString("- " + e.Tag + ": " + e.Description + "\n")
 	}
 	if name = strings.TrimSpace(name); name != "" {
-		b.WriteString("\nFile name or title (a hint, may be generic): " + name + "\n")
+		b.WriteString("\nName the person who recorded it gave the file or recording: " + name + "\nWords in it such as therapy, counseling, session, doctor, appointment, meeting or interview are strong evidence of the type.\n")
+	}
+	if opening = strings.TrimSpace(opening); opening != "" {
+		b.WriteString("\nOpening of the transcript (to judge the setting and who is talking):\n" + opening + "\n")
 	}
 	b.WriteString("\nSummary:\n")
 	b.WriteString(summary)
@@ -387,7 +390,7 @@ func (v Vocabulary) Assemble(c Classified, f Flags, keywords int, known []string
 			has[t] = true
 		}
 		n := 0
-		for _, k := range Standardize(c.Keywords, known, len(c.Keywords)) {
+		for _, k := range Standardize(foldStems(c.Keywords, known), known, len(c.Keywords)) {
 			if has[k] || n == keywords {
 				continue
 			}
@@ -428,4 +431,47 @@ func SplitFlags(in []string, f Flags) (tags, flags []string) {
 		flags = []string{TagSensitive, TagPII}
 	}
 	return tags, flags
+}
+
+// stemKey reduces a keyword to a rough stem per word, so "defensive" and
+// "defensiveness", or "insular" and "insularity", compare equal.
+func stemKey(tag string) string {
+	words := strings.Fields(NormalizeTag(tag))
+	for i, w := range words {
+		for _, suf := range []string{"iveness", "ness", "ity", "ive", "ing", "ed", "es", "s"} {
+			if strings.HasSuffix(w, suf) && len(w)-len(suf) >= 4 {
+				w = strings.TrimSuffix(w, suf)
+				break
+			}
+		}
+		words[i] = w
+	}
+	return strings.Join(words, " ")
+}
+
+// foldStems replaces each keyword with a known keyword of the same stem,
+// and drops later keywords whose stem repeats an earlier one.
+func foldStems(keywords, known []string) []string {
+	byStem := map[string]string{}
+	for _, k := range known {
+		if s := stemKey(k); s != "" {
+			if _, ok := byStem[s]; !ok {
+				byStem[s] = k
+			}
+		}
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, k := range keywords {
+		s := stemKey(k)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		if kk, ok := byStem[s]; ok {
+			k = kk
+		}
+		out = append(out, k)
+	}
+	return out
 }
