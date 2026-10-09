@@ -66,6 +66,8 @@ type SummarySetting struct {
 	TagSynonyms string `json:"tag_synonyms" gorm:"type:text"`
 	// TagNameHints sets the type from words in the recording's own name.
 	TagNameHints string `json:"tag_name_hints" gorm:"type:text"`
+	// TagTitlePrefixes labels generated titles by type ("Therapy: ...").
+	TagTitlePrefixes string `json:"tag_title_prefixes" gorm:"type:text"`
 	// TagKeywords is how many free-form keywords go next to the type and
 	// topics (0 to 5). Nil means the default, 2.
 	TagKeywords *int      `json:"tag_keywords"`

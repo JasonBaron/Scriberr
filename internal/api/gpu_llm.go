@@ -134,7 +134,7 @@ func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, s
 	}
 
 	strict := settings.TagStrict == nil || *settings.TagStrict
-	voc := titles.NewVocabulary(settings.TagTypes, settings.TagTopics, settings.TagSynonyms).WithNameHints(settings.TagNameHints)
+	voc := titles.NewVocabulary(settings.TagTypes, settings.TagTopics, settings.TagSynonyms).WithNameHints(settings.TagNameHints).WithTitlePrefixes(settings.TagTitlePrefixes)
 	if own := ownName(job); own != "" && strict {
 		flags.NameType = voc.TypeFromName(own)
 	}
@@ -147,7 +147,7 @@ func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, s
 		if job.Transcript != nil {
 			opening = transcriptOpening(*job.Transcript, 2500)
 		}
-		prompt = voc.StrictPrompt(summary, name, opening, keywords, known)
+		prompt = voc.StrictPrompt(summary, name, opening, flags.NameType, keywords, known)
 	} else {
 		vocabulary = h.tagVocabulary(ctx)
 		prompt = titles.Prompt(summary, vocabulary)
@@ -191,8 +191,11 @@ func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, s
 		if perr != nil {
 			return fmt.Errorf("unusable reply: %w", perr)
 		}
-		topic, brief = c.Topic, c.Brief
 		tags, flagTags = voc.Assemble(c, flags, keywords, known)
+		topic, brief = c.Topic, c.Brief
+		if len(tags) > 0 && voc.ResolveType(tags[0]) == tags[0] {
+			topic = voc.PrefixTopic(tags[0], topic)
+		}
 	} else {
 		sug, err := titles.Parse(raw, vocabulary)
 		if err != nil {
@@ -207,7 +210,10 @@ func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, s
 
 	h.ensureRecordedAt(ctx, job)
 	title := titles.Format(titles.Pattern(), jobDate(job).In(clock.Display), topic)
-	apply := titles.IsPlaceholder(current, job.AudioPath)
+	// Replace the title when it is a placeholder, or when it is still one
+	// Scriberr suggested earlier (the user has not changed it).
+	apply := titles.IsPlaceholder(current, job.AudioPath) || titles.IsPlaceholder(current, job.OriginalFilename) ||
+		(job.SuggestedTitle != nil && current != "" && current == *job.SuggestedTitle)
 	sug := models.JobSuggestion{Title: title, Brief: brief, Tags: models.StringList(tags), Flags: models.StringList(flagTags), OverwriteEditedTags: overwriteEdited}
 	if err := h.summaryRepo.SaveSuggestions(ctx, job.ID, sug, apply); err != nil {
 		return err

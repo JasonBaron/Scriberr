@@ -15,16 +15,18 @@ interface Settings {
   tag_topics: string;
   tag_synonyms: string;
   tag_name_hints: string;
+  tag_title_prefixes: string;
   default_tag_types: string;
   default_tag_topics: string;
   default_tag_synonyms: string;
   default_tag_name_hints: string;
+  default_tag_title_prefixes: string;
   tag_keywords: number;
   type_count: number;
   topic_count: number;
 }
 
-type ListKey = "tag_types" | "tag_topics" | "tag_synonyms" | "tag_name_hints";
+type ListKey = "tag_types" | "tag_topics" | "tag_synonyms" | "tag_name_hints" | "tag_title_prefixes";
 
 const lists: { key: ListKey; def: keyof Settings; label: string; help: string; rows: number }[] = [
   {
@@ -43,6 +45,10 @@ const lists: { key: ListKey; def: keyof Settings; label: string; help: string; r
     key: "tag_name_hints", def: "default_tag_name_hints", label: "Recording type from the file name", rows: 6,
     help: "words, other words = type. When the name you gave the file contains these words, that type wins over the model. The longest match wins (speech therapy beats therapy).",
   },
+  {
+    key: "tag_title_prefixes", def: "default_tag_title_prefixes", label: "Title label by type", rows: 4,
+    help: "type = Label. Generated titles start with the label after the date: 2026-06-03 Therapy: Boundaries With Family.",
+  },
 ];
 
 // TagVocabularySettings controls how recordings are tagged: a fixed list of
@@ -52,7 +58,7 @@ export function TagVocabularySettings({ disabled = false }: { disabled?: boolean
   const { getAuthHeaders } = useAuth();
   const queryClient = useQueryClient();
   const [s, setS] = useState<Settings | null>(null);
-  const [draft, setDraft] = useState<Record<ListKey, string>>({ tag_types: "", tag_topics: "", tag_synonyms: "", tag_name_hints: "" });
+  const [draft, setDraft] = useState<Record<ListKey, string>>({ tag_types: "", tag_topics: "", tag_synonyms: "", tag_name_hints: "", tag_title_prefixes: "" });
   const [owner, setOwner] = useState("");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -61,7 +67,7 @@ export function TagVocabularySettings({ disabled = false }: { disabled?: boolean
   const apply = (data: Settings) => {
     setS(data);
     setOwner(data.owner_name || "");
-    setDraft({ tag_types: data.tag_types, tag_topics: data.tag_topics, tag_synonyms: data.tag_synonyms, tag_name_hints: data.tag_name_hints });
+    setDraft({ tag_types: data.tag_types, tag_topics: data.tag_topics, tag_synonyms: data.tag_synonyms, tag_name_hints: data.tag_name_hints, tag_title_prefixes: data.tag_title_prefixes });
   };
 
   useEffect(() => {

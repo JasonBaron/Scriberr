@@ -89,12 +89,15 @@ func TestParseStrictKeywords(t *testing.T) {
 
 func TestPromptKeywords(t *testing.T) {
 	v := NewVocabulary("", "", "")
-	if p := v.StrictPrompt("s", "", "", 0, nil); strings.Contains(p, "keywords") {
+	if p := v.StrictPrompt("s", "", "", "", 0, nil); strings.Contains(p, "keywords") {
 		t.Error("no keywords line when disabled")
 	}
-	p := v.StrictPrompt("s", "Therapy Session (Jason)", "[S1] How have you been since our last session?", 3, []string{"stoicism"})
+	p := v.StrictPrompt("s", "Therapy Session (Jason)", "[S1] How have you been since our last session?", "individual therapy", 3, []string{"stoicism"})
 	if !strings.Contains(p, "1 to 3 specific") || !strings.Contains(p, "stoicism") {
 		t.Error("keywords line and known keywords expected")
+	}
+	if !strings.Contains(p, "already known from its name: individual therapy") {
+		t.Error("known type expected in prompt")
 	}
 	if !strings.Contains(p, "Therapy Session (Jason)") || !strings.Contains(p, "since our last session") {
 		t.Error("name and transcript opening expected")
@@ -160,5 +163,22 @@ func TestTypeFromName(t *testing.T) {
 	tags, _ := v.Assemble(Classified{Type: "relationship talk", Topics: []string{"mental health"}}, Flags{NameType: "individual therapy"}, 2, nil)
 	if tags[0] != "individual therapy" {
 		t.Errorf("name type should win: %v", tags)
+	}
+}
+
+func TestPrefixTopic(t *testing.T) {
+	v := NewVocabulary("", "", "").WithTitlePrefixes("")
+	if got := v.PrefixTopic("individual therapy", "Boundaries With Family"); got != "Therapy: Boundaries With Family" {
+		t.Error(got)
+	}
+	if got := v.PrefixTopic("individual therapy", "Therapy: Already"); got != "Therapy: Already" {
+		t.Error(got)
+	}
+	if got := v.PrefixTopic("conversation", "Weekend Plans"); got != "Weekend Plans" {
+		t.Error(got)
+	}
+	c := NewVocabulary("", "", "").WithTitlePrefixes("work meeting = Meeting:\nnot a type = X")
+	if c.PrefixTopic("work meeting", "Budget") != "Meeting: Budget" || len(c.TitlePrefixes) != 1 {
+		t.Errorf("%v", c.TitlePrefixes)
 	}
 }

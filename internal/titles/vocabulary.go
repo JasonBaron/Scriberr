@@ -102,6 +102,46 @@ type Vocabulary struct {
 	// NameHints maps words in a recording's own name to a type, which then
 	// wins over the model: "therapy session" means individual therapy.
 	NameHints map[string]string
+	// TitlePrefixes maps a type to a label for generated titles.
+	TitlePrefixes map[string]string
+}
+
+// DefaultTitlePrefixes puts a label in front of the topic in generated
+// titles, one rule per line: "type = Label". "2026-06-03 Therapy: ...".
+const DefaultTitlePrefixes = `individual therapy = Therapy
+couples therapy = Couples Therapy
+medical appointment = Medical
+advisor meeting = Advisor`
+
+// WithTitlePrefixes sets the title labels from settings text; empty means
+// the default.
+func (v Vocabulary) WithTitlePrefixes(text string) Vocabulary {
+	if strings.TrimSpace(text) == "" {
+		text = DefaultTitlePrefixes
+	}
+	v.TitlePrefixes = map[string]string{}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		left, right, ok := strings.Cut(line, "=")
+		label := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(right), ":"))
+		if t := v.ResolveType(left); ok && t != "" && label != "" {
+			v.TitlePrefixes[t] = label
+		}
+	}
+	return v
+}
+
+// PrefixTopic puts the type's title label in front of topic ("Therapy:
+// Boundaries With Family"), unless the topic already starts with it.
+func (v Vocabulary) PrefixTopic(typ, topic string) string {
+	label := v.TitlePrefixes[typ]
+	if label == "" || strings.HasPrefix(strings.ToLower(topic), strings.ToLower(label)) {
+		return topic
+	}
+	return label + ": " + topic
 }
 
 // DefaultNameHints sets the type from words in the name the person gave
@@ -286,7 +326,7 @@ func IsFlag(tag string) bool { return tag == TagSensitive || tag == TagPII }
 // comes from the transcript check only. name is the recording's current
 // title or file name, a useful hint. known lists keywords already in use,
 // most used first, for reuse.
-func (v Vocabulary) StrictPrompt(summary, name, opening string, keywords int, known []string) string {
+func (v Vocabulary) StrictPrompt(summary, name, opening, knownType string, keywords int, known []string) string {
 	var b strings.Builder
 	shape := `{"topic": "...", "brief": "...", "type": "...", "topics": ["..."]}`
 	if keywords > 0 {
@@ -295,7 +335,7 @@ func (v Vocabulary) StrictPrompt(summary, name, opening string, keywords int, kn
 	b.WriteString("Read this summary of a recording and return JSON only, no other text:\n" + shape + `
 
 topic: 4 to 8 words naming what the recording is specifically about. Title Case. No date, no quotes, no trailing punctuation. Avoid generic words like Recording, Conversation, Discussion, Meeting, Summary.
-brief: one plain sentence of at most 25 words saying what the recording covers, for a list view. Never include a date of birth, ID or account number, phone number, email or address.
+brief: one plain sentence of at most 25 words saying what the recording covers, for a list view. Describe the setting correctly: in a therapy session the speakers are a client and a therapist, so write "therapy session", never "partners" or "two individuals"; people who are only talked about are not speakers. Never include a date of birth, ID or account number, phone number, email or address.
 type: exactly one recording type from the list below, spelled exactly as shown. Decide by who is talking and the setting, not by the subject: a therapist or counselor taking part makes it a therapy type even when the subject is a relationship. The recording's name and the opening of the transcript below are the best evidence.
 topics: 2 or 3 topics from the list below, spelled exactly as shown, most important first. Use only 1 when the recording is very short or about a single thing. Only main subjects, not passing mentions. Never invent a topic.
 `)
@@ -316,6 +356,15 @@ topics: 2 or 3 topics from the list below, spelled exactly as shown, most import
 	b.WriteString("\nTopics:\n")
 	for _, e := range v.Topics {
 		b.WriteString("- " + e.Tag + ": " + e.Description + "\n")
+	}
+	if knownType != "" {
+		desc := ""
+		for _, e := range v.Types {
+			if e.Tag == knownType {
+				desc = " (" + e.Description + ")"
+			}
+		}
+		b.WriteString("\nThe recording type is already known from its name: " + knownType + desc + ". Use it as \"type\", and write the topic and brief to match who is actually speaking in that setting.\n")
 	}
 	if name = strings.TrimSpace(name); name != "" {
 		b.WriteString("\nName the person who recorded it gave the file or recording: " + name + "\nWords in it such as therapy, counseling, session, doctor, appointment, meeting or interview are strong evidence of the type.\n")
