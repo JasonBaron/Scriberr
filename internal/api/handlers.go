@@ -58,6 +58,9 @@ type Handler struct {
 	multiTrackProcessor *processing.MultiTrackProcessor
 	broadcaster         *sse.Broadcaster
 	summaries           *summaryRunner
+	voiceRepo           repository.VoiceRepository
+	voicePrinter        VoicePrinter
+	voices              *voiceRunner
 }
 
 // NewHandler creates a new handler
@@ -103,6 +106,7 @@ func NewHandler(
 		multiTrackProcessor: multiTrackProcessor,
 		broadcaster:         broadcaster,
 		summaries:           newSummaryRunner(),
+		voices:              newVoiceRunner(),
 	}
 }
 

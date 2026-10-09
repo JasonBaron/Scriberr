@@ -83,26 +83,30 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | | One folder per recording (`data/recordings/<upload-date>_<job-id>/`): audio, `metadata.json`, `transcript.json`, `summaries/*.md`, and `processing/` (model output, job log). Existing recordings are moved there on first start |
 | | Export (.zip) in the job menu: the recording folder (audio, metadata, transcript, summaries, job log) as one download. `GET /api/v1/transcription/:id/export` |
 | | List refreshes while jobs run and shows the pipeline stage and summary status |
+| fork-features-3 | Summarize existing recordings (Settings > Summary): recordings without a summary, with a tag, or all, using the default or any template. Runs in the background one at a time, with progress, cancel and a dry-run count. `POST/GET/DELETE /api/v1/summaries/run` |
+| | Tag-linked templates: a template can list tags (for example `therapy`, which also matches `couples therapy` and plurals). With automatic summaries on, recordings with one of those tags also get that template's summary after the default one, including when the tag is added later |
+| | Tags (Settings > Summary > Tags and privacy): exactly one recording type and 2 or 3 topics from editable lists with descriptions, plus up to 2 free-form keywords (setting 0 to 5) for concrete details (a named condition, test, practice, event), never feelings or behaviors, reused across recordings where they fit. Synonyms map rewordings onto the lists. Scriberr adds `youtube`. Words in the file name you gave (therapy session, couples therapy, doctor, meeting, editable) set the type over the model, and generated titles get a label by type (`2026-06-03 Therapy: …`). Flags `sensitive` and `pii` are kept apart from tags and shown after them; summaries and tags are generated at temperature 0 with a fixed seed, so reruns match. Transcripts longer than about 36k characters (`SCRIBERR_SUMMARY_CHUNK_CHARS`) are summarized from notes written part by part, so nothing is dropped |
+| | PII: dates of birth, SSN and ID numbers, account and card numbers, phone numbers, emails and street addresses are detected in transcripts by pattern (tag `pii`; the model is not asked, it over-flagged) and redacted from saved summaries and briefs |
+| | Retag only: reruns the title, brief and tags step on existing summaries (a few seconds each), optionally including hand-edited tags; tag-linked templates follow |
+| | Built-in templates, added on startup with an on/off switch: Default, Individual Therapy Session, Couples Therapy Session, Relationship Talk Review, Argument Review, Separation Planning, Medical Appointment Notes, Advisor Meeting Notes, Work Meeting Notes, Media Notes, Personal Note, General Transcript Summary. Each runs on its recording type or topic. Edit freely; "Reset to default" restores the shipped version (`POST /api/v1/summaries/:id/reset`), `PATCH /api/v1/summaries/:id` changes the model or turns it on or off (also from the template list). Older templates with the same or a former name are linked, not duplicated. Templates without a model use "Model for templates without one" in Settings > Summary |
+| | Your name (Settings > Summary): templates address that speaker as "you" through the `{me}` placeholder |
+| | YouTube downloads are titled `<date> YouTube: <video title>`, tagged `youtube` and typed `media` |
 
-### In progress (fork-features-3)
+### In progress (fork-features-4)
 
 | Change |
 |---|
-| Summarize existing recordings (Settings > Summary): recordings without a summary, with a tag, or all, using the default or any template. Runs in the background one at a time, with progress, cancel and a dry-run count. `POST/GET/DELETE /api/v1/summaries/run` |
-| Tag-linked templates: a template can list tags (for example `therapy`, which also matches `couples therapy` and plurals). With automatic summaries on, recordings with one of those tags also get that template's summary after the default one, including when the tag is added later |
-| Tags (Settings > Summary > Tags and privacy): exactly one recording type and 2 or 3 topics from editable lists with descriptions, plus up to 2 free-form keywords (setting 0 to 5) for concrete details (a named condition, test, practice, event), never feelings or behaviors, reused across recordings where they fit. Synonyms map rewordings onto the lists. Scriberr adds `youtube`. Words in the file name you gave (therapy session, couples therapy, doctor, meeting, editable) set the type over the model, and generated titles get a label by type (`2026-06-03 Therapy: …`). Flags `sensitive` and `pii` are kept apart from tags and shown after them; summaries and tags are generated at temperature 0 with a fixed seed, so reruns match. Transcripts longer than about 36k characters (`SCRIBERR_SUMMARY_CHUNK_CHARS`) are summarized from notes written part by part, so nothing is dropped |
-| PII: dates of birth, SSN and ID numbers, account and card numbers, phone numbers, emails and street addresses are detected in transcripts by pattern (tag `pii`; the model is not asked, it over-flagged) and redacted from saved summaries and briefs |
-| Retag only: reruns the title, brief and tags step on existing summaries (a few seconds each), optionally including hand-edited tags; tag-linked templates follow |
-| Built-in templates, added on startup with an on/off switch: Default, Individual Therapy Session, Couples Therapy Session, Relationship Talk Review, Argument Review, Separation Planning, Medical Appointment Notes, Advisor Meeting Notes, Work Meeting Notes, Media Notes, Personal Note, General Transcript Summary. Each runs on its recording type or topic. Edit freely; "Reset to default" restores the shipped version (`POST /api/v1/summaries/:id/reset`), `PATCH /api/v1/summaries/:id` changes the model or turns it on or off (also from the template list). Older templates with the same or a former name are linked, not duplicated. Templates without a model use "Model for templates without one" in Settings > Summary |
-| Your name (Settings > Summary): templates address that speaker as "you" through the `{me}` placeholder |
-| YouTube downloads are titled `<date> YouTube: <video title>`, tagged `youtube` and typed `media` |
+| One speaker per transcript segment: segments are cut where the word-level speakers change, so two people trading short turns are no longer shown under one name. Applied to new transcripts and, once on start, to stored ones (words and notes untouched) |
+| Speaker voice ID (Settings > Voices): each speaker in a recording gets a voice print from the PyAnnote speaker model (same environment and HF token as diarization; prints stay in the local database). Naming a speaker teaches that voice; other recordings where it speaks are named automatically (marked "named by voice" in Rename Speakers, never over a name you typed). The rename dialog also suggests close voices. Scan new recordings automatically, scan or rescan the library, match threshold, rename or delete voices. `GET/POST /api/v1/voices`, `GET /api/v1/transcription/:id/voices` |
+| Redo flag: a recording where one label holds two voices, or one voice got two labels, is flagged `redo` (search "redo"); the reason is shown in Rename Speakers |
+| The voice scan runs before the automatic summary, so summaries use the names |
 
 ### Next
 
 | Item | Notes |
 |---|---|
 | fork-fixes-5: YouTube | Transcripts do not appear after adding a video; Shorts links are not accepted |
-| fork-features-4: speaker voice ID | Enroll voices, match PyAnnote embeddings, rename speakers automatically; fingerprints stay local |
+| Re-transcribe flagged recordings | Rerun recordings flagged `redo` (or a selection) with current settings |
 | Progress and ETA | Per-model estimates from measured real-time factors |
 | Metrics | Processing time, model and RTF per job in the UI |
 | Transcript search | Search inside transcript text, not only titles |

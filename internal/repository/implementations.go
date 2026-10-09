@@ -636,6 +636,9 @@ type SpeakerMappingRepository interface {
 	Repository[models.SpeakerMapping]
 	ListByJob(ctx context.Context, jobID string) ([]models.SpeakerMapping, error)
 	UpdateMappings(ctx context.Context, jobID string, mappings []models.SpeakerMapping) error
+	CountByName(ctx context.Context, name string) int64
+	RenameVoiceMappings(ctx context.Context, profileID, name string) error
+	RenameSpeaker(ctx context.Context, jobID, speaker, from, to string) error
 	DeleteByJobID(ctx context.Context, jobID string) error
 }
 
@@ -677,6 +680,28 @@ func (r *speakerMappingRepository) UpdateMappings(ctx context.Context, jobID str
 		}
 		return nil
 	})
+}
+
+// CountByName counts recordings with a speaker of this name.
+func (r *speakerMappingRepository) CountByName(ctx context.Context, name string) int64 {
+	var n int64
+	r.db.WithContext(ctx).Model(&models.SpeakerMapping{}).Where("LOWER(custom_name) = ?", strings.ToLower(name)).
+		Distinct("transcription_job_id").Count(&n)
+	return n
+}
+
+// RenameVoiceMappings renames the speakers a voice profile named.
+func (r *speakerMappingRepository) RenameVoiceMappings(ctx context.Context, profileID, name string) error {
+	return r.db.WithContext(ctx).Model(&models.SpeakerMapping{}).
+		Where("voice_profile_id = ? AND source = ?", profileID, models.MappingVoice).
+		Update("custom_name", name).Error
+}
+
+// RenameSpeaker renames one speaker of a recording if it still has the old name.
+func (r *speakerMappingRepository) RenameSpeaker(ctx context.Context, jobID, speaker, from, to string) error {
+	return r.db.WithContext(ctx).Model(&models.SpeakerMapping{}).
+		Where("transcription_job_id = ? AND original_speaker = ? AND custom_name = ?", jobID, speaker, from).
+		Update("custom_name", to).Error
 }
 
 // RefreshTokenRepository handles refresh token operations

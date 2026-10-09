@@ -18,12 +18,15 @@ type TranscriptionJob struct {
 	Summary               *string        `json:"summary,omitempty" gorm:"type:text"`
 	SuggestedTitle        *string        `json:"suggested_title,omitempty" gorm:"type:text"`
 	SuggestedTags         StringList     `json:"suggested_tags,omitempty" gorm:"type:text"`
-	SourceURL             *string        `json:"source_url,omitempty" gorm:"type:text"`                // where the audio came from (YouTube link)
+	SourceURL             *string        `json:"source_url,omitempty" gorm:"type:text"` // where the audio came from (YouTube link)
 	Tags                  StringList     `json:"tags,omitempty" gorm:"type:text"`
-	Flags                 StringList     `json:"flags,omitempty" gorm:"type:text"`                     // set by Scriberr, not counted as tags: sensitive, pii                      // shown and searchable; generated until edited by hand
-	TagsEdited            bool           `json:"tags_edited" gorm:"default:false"`                     // true once the user changed the tags
-	SummaryBrief          *string        `json:"summary_brief,omitempty" gorm:"type:text"`             // one-sentence summary for the list
-	SummaryStatus         string         `json:"summary_status,omitempty" gorm:"type:varchar(20)"`     // automatic summary: queued, running, or empty
+	Flags                 StringList     `json:"flags,omitempty" gorm:"type:text"`                 // set by Scriberr, not counted as tags: sensitive, pii                      // shown and searchable; generated until edited by hand
+	TagsEdited            bool           `json:"tags_edited" gorm:"default:false"`                 // true once the user changed the tags
+	SummaryBrief          *string        `json:"summary_brief,omitempty" gorm:"type:text"`         // one-sentence summary for the list
+	SummaryStatus         string         `json:"summary_status,omitempty" gorm:"type:varchar(20)"` // automatic summary: queued, running, or empty
+	VoiceStatus           string         `json:"voice_status,omitempty" gorm:"type:varchar(20)"`   // voice scan: queued, running, done, none, failed
+	VoiceIssues           string         `json:"voice_issues,omitempty" gorm:"type:text"`          // JSON list of speaker problems, or the scan error
+	VoiceScannedAt        *time.Time     `json:"voice_scanned_at,omitempty"`
 	RecordedAt            *time.Time     `json:"recorded_at,omitempty"`                                // from file metadata or the file's modified time; nil if unknown
 	RecordedAtSource      string         `json:"recorded_at_source,omitempty" gorm:"type:varchar(20)"` // metadata or file
 	FileHash              string         `json:"file_hash,omitempty" gorm:"type:varchar(64);index"`    // SHA-256 of the uploaded file
@@ -235,10 +238,10 @@ func (tp *TranscriptionProfile) BeforeSave(tx *gorm.DB) error {
 // LLMConfig represents LLM configuration settings
 type LLMConfig struct {
 	ID            uint      `json:"id" gorm:"primaryKey"`
-	Provider      string    `json:"provider" gorm:"not null;type:varchar(50)"` // "ollama" or "openai"
-	BaseURL       *string   `json:"base_url,omitempty" gorm:"type:text"`       // For Ollama
+	Provider      string    `json:"provider" gorm:"not null;type:varchar(50)"`  // "ollama" or "openai"
+	BaseURL       *string   `json:"base_url,omitempty" gorm:"type:text"`        // For Ollama
 	OpenAIBaseURL *string   `json:"openai_base_url,omitempty" gorm:"type:text"` // For OpenAI custom endpoint
-	APIKey        *string   `json:"api_key,omitempty" gorm:"type:text"`        // For OpenAI (encrypted)
+	APIKey        *string   `json:"api_key,omitempty" gorm:"type:text"`         // For OpenAI (encrypted)
 	IsActive      bool      `json:"is_active" gorm:"type:boolean;default:false"`
 	CreatedAt     time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt     time.Time `json:"updated_at" gorm:"autoUpdateTime"`
@@ -378,6 +381,9 @@ type SpeakerMapping struct {
 	TranscriptionJobID string    `json:"transcription_job_id" gorm:"type:varchar(36);not null;index"`
 	OriginalSpeaker    string    `json:"original_speaker" gorm:"type:varchar(50);not null"` // e.g., "speaker_00"
 	CustomName         string    `json:"custom_name" gorm:"type:varchar(100);not null"`     // e.g., "John Doe"
+	Source             string    `json:"source,omitempty" gorm:"type:varchar(10)"`          // "" named by hand, "voice" named by voice match
+	VoiceProfileID     *string   `json:"voice_profile_id,omitempty" gorm:"type:varchar(36);index"`
+	Score              float64   `json:"score,omitempty"` // voice match similarity
 	CreatedAt          time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt          time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 

@@ -131,11 +131,31 @@ export const TranscriptView = forwardRef<HTMLDivElement, TranscriptViewProps>(({
     const expandedData = useMemo(() => {
         if (!transcript?.segments || !transcript.word_segments) return [];
 
-        return transcript.segments.map((segment) => {
-            // Filter words belonging to this segment
-            const segmentWords = transcript.word_segments!.filter(
-                word => word.start >= segment.start - 0.1 && word.end <= segment.end + 0.1
-            );
+        // Each word belongs to one segment: the last one that has started by
+        // the word's start (segments split at speaker changes touch end to
+        // start, so a time-window filter showed edge words twice).
+        const segs = transcript.segments;
+        const owner = (start: number) => {
+            let lo = 0, hi = segs.length - 1, found = -1;
+            while (lo <= hi) {
+                const mid = (lo + hi) >> 1;
+                if (segs[mid].start - 0.1 <= start) { found = mid; lo = mid + 1; } else { hi = mid - 1; }
+            }
+            return found;
+        };
+        const bySegment: WordSegment[][] = segs.map(() => []);
+        let last = -1;
+        transcript.word_segments.forEach(word => {
+            // Words without timings (WhisperX numbers) stay with the word before
+            const i = word.start <= 0 && word.end <= 0 && last >= 0 ? last : owner(word.start);
+            if (i >= 0 && (i === last || word.end <= segs[i].end + 0.1)) {
+                bySegment[i].push(word);
+                last = i;
+            }
+        });
+
+        return segs.map((segment, index) => {
+            const segmentWords = bySegment[index];
 
             // Compute local offsets for this segment's text
             const { fullText, offsets } = computeWordOffsets(segmentWords);

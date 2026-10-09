@@ -160,6 +160,8 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 			// Speaker mappings for a transcription
 			transcription.GET("/:id/speakers", handler.GetSpeakerMappings)
 			transcription.POST("/:id/speakers", handler.UpdateSpeakerMappings)
+			transcription.GET("/:id/voices", handler.GetRecordingVoices)
+			transcription.POST("/:id/voices/scan", handler.ScanRecordingVoices)
 
 			// Quick transcription endpoints
 			transcription.POST("/quick", handler.SubmitQuickTranscription)
@@ -226,6 +228,18 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 		}
 
 		// Chat routes (require authentication)
+		voices := v1.Group("/voices")
+		voices.Use(middleware.AuthMiddleware(authService))
+		{
+			voices.GET("", handler.GetVoices)
+			voices.POST("/settings", handler.SaveVoiceSettings)
+			voices.POST("/scan", handler.ScanVoices)
+			voices.DELETE("/scan", handler.CancelVoiceScans)
+			voices.POST("/match", handler.MatchVoices)
+			voices.PATCH("/:id", handler.RenameVoice)
+			voices.DELETE("/:id", handler.DeleteVoice)
+		}
+
 		chat := v1.Group("/chat")
 		chat.Use(middleware.AuthMiddleware(authService))
 		{

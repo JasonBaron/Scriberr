@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { User, Settings as SettingsIcon, Key, Bot, FileText, Plus, Terminal } from "lucide-react";
+import { User, Settings as SettingsIcon, Key, Bot, FileText, Plus, Terminal, AudioLines } from "lucide-react";
 import {
   Tabs,
   TabsContent,
@@ -20,6 +20,7 @@ import { CLISettingsTab } from "../components/CLISettingsTab";
 import { AutoSummarySetting } from "../components/AutoSummarySetting";
 import { SummaryRunPanel } from "../components/SummaryRunPanel";
 import { TagVocabularySettings } from "../components/TagVocabularySettings";
+import { VoiceSettings } from "../components/VoiceSettings";
 import { useAuth } from "@/features/auth/hooks/useAuth";
 
 export function Settings() {
@@ -71,7 +72,7 @@ export function Settings() {
           onValueChange={setActiveTab}
           className="space-y-4 sm:space-y-6"
         >
-          <TabsList className="grid w-full grid-cols-6 items-center h-auto bg-[var(--bg-main)]/50 border border-[var(--border-subtle)] p-1 rounded-xl">
+          <TabsList className="grid w-full grid-cols-7 items-center h-auto bg-[var(--bg-main)]/50 border border-[var(--border-subtle)] p-1 rounded-xl">
             <TabsTrigger
               value="transcription"
               aria-label="Transcription"
@@ -111,6 +112,14 @@ export function Settings() {
             >
               <FileText className="h-4 w-4" />
               <span className="hidden sm:inline">Summary</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="voices"
+              aria-label="Voices"
+              className="flex items-center justify-center gap-2 h-9 py-1.5 data-[state=active]:bg-[var(--bg-card)] data-[state=active]:shadow-sm data-[state=active]:text-[var(--text-primary)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] font-medium rounded-lg text-xs sm:text-sm transition-all"
+            >
+              <AudioLines className="h-4 w-4" />
+              <span className="hidden sm:inline">Voices</span>
             </TabsTrigger>
             <TabsTrigger
               value="cli"
@@ -198,6 +207,12 @@ export function Settings() {
           </TabsContent>
 
           {/* CLI Watcher Tab */}
+          <TabsContent value="voices" className="space-y-6">
+            <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-[var(--radius-card)] p-4 sm:p-6 shadow-sm">
+              <VoiceSettings />
+            </div>
+          </TabsContent>
+
           <TabsContent value="cli" className="space-y-6">
             <CLISettingsTab />
           </TabsContent>

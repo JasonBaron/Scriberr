@@ -18,6 +18,7 @@ import (
 	"scriberr/internal/transcription/interfaces"
 	"scriberr/internal/transcription/pipeline"
 	"scriberr/internal/transcription/registry"
+	"scriberr/internal/transcription/speakers"
 	"scriberr/internal/webhook"
 	"scriberr/pkg/logger"
 )
@@ -1047,6 +1048,10 @@ func (u *UnifiedTranscriptionService) findBestSpeakerForSegment(start, end float
 
 // saveTranscriptionResults saves the transcription results to the database
 func (u *UnifiedTranscriptionService) saveTranscriptionResults(jobID string, result *interfaces.TranscriptResult) error {
+	// One speaker per segment: cut segments where the word speakers change
+	if speakers.Apply(result) {
+		logger.Info("Split segments at speaker changes", "job_id", jobID, "segments", len(result.Segments))
+	}
 	// Convert result to JSON string for database storage
 	resultJSON, err := u.convertTranscriptResultToJSON(result)
 	if err != nil {

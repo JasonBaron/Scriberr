@@ -70,8 +70,14 @@ type SummarySetting struct {
 	TagTitlePrefixes string `json:"tag_title_prefixes" gorm:"type:text"`
 	// TagKeywords is how many free-form keywords go next to the type and
 	// topics (0 to 5). Nil means the default, 2.
-	TagKeywords *int      `json:"tag_keywords"`
-	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	TagKeywords *int `json:"tag_keywords"`
+	// VoiceAuto scans each new recording's speakers and names the ones
+	// that match a known voice. Nil means on.
+	VoiceAuto *bool `json:"voice_auto"`
+	// VoiceThreshold is the lowest similarity that names a speaker. Nil
+	// means the default.
+	VoiceThreshold *float64  `json:"voice_threshold"`
+	UpdatedAt      time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 // Summary stores a generated summary linked to a transcription

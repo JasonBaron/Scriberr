@@ -186,7 +186,11 @@ func main() {
 	handler.MigrateFlags(context.Background())
 	handler.ResetSummaryStatuses(context.Background())
 	handler.StartSummaryWorker(context.Background())
-	queue.OnJobCompleted(handler.AutoSummarize)
+	handler.SetVoices(repository.NewVoiceRepository(database.DB), pyannoteAdapter)
+	handler.StartVoiceWorker(context.Background())
+	go handler.SplitStoredSegments(context.Background())
+	// Voice scan (names known speakers) first, then the automatic summary
+	queue.OnJobCompleted(handler.AfterTranscription)
 	go handler.BackfillFileHashes(context.Background())
 
 	// Set up router. Until model environments are ready, /health reports
@@ -256,6 +260,9 @@ func main() {
 	logger.Info("Server stopped")
 }
 
+// pyannoteAdapter is kept for voice prints (set by registerAdapters).
+var pyannoteAdapter *adapters.PyAnnoteAdapter
+
 // registerAdapters registers all transcription and diarization adapters with config-based paths
 func registerAdapters(cfg *config.Config) {
 	logger.Info("Registering adapters with environment path", "whisperx_env", cfg.WhisperXEnv)
@@ -286,8 +293,8 @@ func registerAdapters(cfg *config.Config) {
 		adapters.NewOpenAIAdapter(cfg.OpenAIAPIKey))
 
 	// Register diarization adapters
-	registry.RegisterDiarizationAdapter("pyannote",
-		adapters.NewPyAnnoteAdapter(pyannoteEnvPath)) // Dedicated environment
+	pyannoteAdapter = adapters.NewPyAnnoteAdapter(pyannoteEnvPath) // Dedicated environment; also makes voice prints
+	registry.RegisterDiarizationAdapter("pyannote", pyannoteAdapter)
 	registry.RegisterDiarizationAdapter("sortformer",
 		adapters.NewSortformerAdapter(nvidiaEnvPath)) // Shares with Parakeet
 

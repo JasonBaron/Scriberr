@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"strings"
 
 	"scriberr/internal/models"
 
@@ -22,9 +24,19 @@ type SpeakerMappingsUpdateRequest struct {
 
 // SpeakerMappingResponse represents a speaker mapping response
 type SpeakerMappingResponse struct {
-	ID              uint   `json:"id"`
-	OriginalSpeaker string `json:"original_speaker"`
-	CustomName      string `json:"custom_name"`
+	ID              uint    `json:"id"`
+	OriginalSpeaker string  `json:"original_speaker"`
+	CustomName      string  `json:"custom_name"`
+	Source          string  `json:"source,omitempty"` // "voice" when named by voice match
+	Score           float64 `json:"score,omitempty"`
+}
+
+func mappingResponses(mappings []models.SpeakerMapping) []SpeakerMappingResponse {
+	out := make([]SpeakerMappingResponse, len(mappings))
+	for i, m := range mappings {
+		out[i] = SpeakerMappingResponse{ID: m.ID, OriginalSpeaker: m.OriginalSpeaker, CustomName: m.CustomName, Source: m.Source, Score: m.Score}
+	}
+	return out
 }
 
 // GetSpeakerMappings retrieves all speaker mappings for a transcription
@@ -68,17 +80,7 @@ func (h *Handler) GetSpeakerMappings(c *gin.Context) {
 		return
 	}
 
-	// Convert to response format
-	response := make([]SpeakerMappingResponse, len(mappings))
-	for i, mapping := range mappings {
-		response[i] = SpeakerMappingResponse{
-			ID:              mapping.ID,
-			OriginalSpeaker: mapping.OriginalSpeaker,
-			CustomName:      mapping.CustomName,
-		}
-	}
-
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, mappingResponses(mappings))
 }
 
 // UpdateSpeakerMappings updates speaker mappings for a transcription
@@ -122,14 +124,31 @@ func (h *Handler) UpdateSpeakerMappings(c *gin.Context) {
 		return
 	}
 
-	// Convert request to model
+	// Convert request to model. A name the voice match gave and the user
+	// left as it was stays a voice name; anything else is a name given by
+	// hand, which teaches the voice profiles.
+	existing, _ := h.speakerMappingRepo.ListByJob(c.Request.Context(), jobID)
+	byVoice := map[string]models.SpeakerMapping{}
+	for _, m := range existing {
+		if m.Source == models.MappingVoice {
+			byVoice[m.OriginalSpeaker] = m
+		}
+	}
 	var mappings []models.SpeakerMapping
 	for _, mapping := range req.Mappings {
-		mappings = append(mappings, models.SpeakerMapping{
+		m := models.SpeakerMapping{
 			TranscriptionJobID: jobID,
 			OriginalSpeaker:    mapping.OriginalSpeaker,
-			CustomName:         mapping.CustomName,
-		})
+			CustomName:         strings.TrimSpace(mapping.CustomName),
+		}
+		// The dialog sends every speaker; one left at its label is unnamed
+		if m.CustomName == "" || m.CustomName == m.OriginalSpeaker {
+			continue
+		}
+		if v, ok := byVoice[m.OriginalSpeaker]; ok && v.CustomName == m.CustomName {
+			m.Source, m.VoiceProfileID, m.Score = v.Source, v.VoiceProfileID, v.Score
+		}
+		mappings = append(mappings, m)
 	}
 
 	// Update mappings using repository
@@ -145,15 +164,6 @@ func (h *Handler) UpdateSpeakerMappings(c *gin.Context) {
 		return
 	}
 
-	// Convert to response format
-	response := make([]SpeakerMappingResponse, len(updatedMappings))
-	for i, mapping := range updatedMappings {
-		response[i] = SpeakerMappingResponse{
-			ID:              mapping.ID,
-			OriginalSpeaker: mapping.OriginalSpeaker,
-			CustomName:      mapping.CustomName,
-		}
-	}
-
-	c.JSON(http.StatusOK, response)
+	go h.enrollFromMappings(context.Background(), jobID, updatedMappings)
+	c.JSON(http.StatusOK, mappingResponses(updatedMappings))
 }

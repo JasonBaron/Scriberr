@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
-import { Loader2, Users, Save, X } from 'lucide-react';
+import { AudioLines, Loader2, Users, Save, X } from 'lucide-react';
 import { useAuth } from "@/features/auth/hooks/useAuth";
 // Note: Install framer-motion for enhanced animations
 // import { motion, AnimatePresence } from 'framer-motion';
@@ -13,6 +13,17 @@ interface SpeakerMapping {
   id?: number;
   original_speaker: string;
   custom_name: string;
+  source?: string; // "voice" when named by voice match
+  score?: number;
+}
+
+interface RecordingVoices {
+  available: boolean;
+  status?: string;
+  threshold?: number;
+  speakers?: { speaker: string; seconds: number; matches: { name: string; score: number }[] }[];
+  problems?: { kind: string; speakers: string[]; text: string }[] | null;
+  error?: string;
 }
 
 interface SpeakerRenameDialogProps {
@@ -35,6 +46,9 @@ const SpeakerRenameDialog: React.FC<SpeakerRenameDialogProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [voiceNamed, setVoiceNamed] = useState<Record<string, SpeakerMapping>>({});
+  const [voices, setVoices] = useState<RecordingVoices | null>(null);
+  const [scanQueued, setScanQueued] = useState(false);
 
   // The parent re-renders many times a second during playback and passes a
   // new array each time. Compare speakers by value so the dialog does not
@@ -58,6 +72,13 @@ const SpeakerRenameDialog: React.FC<SpeakerRenameDialogProps> = ({
       }
 
       const existingMappings: SpeakerMapping[] = await response.json();
+      const byVoice: Record<string, SpeakerMapping> = {};
+      existingMappings.forEach(m => { if (m.source === 'voice') byVoice[m.original_speaker] = m; });
+      setVoiceNamed(byVoice);
+      fetch(`/api/v1/transcription/${transcriptionId}/voices`, { headers: { ...getAuthHeaders() } })
+        .then(r => (r.ok ? r.json() : null))
+        .then((v: RecordingVoices | null) => setVoices(v))
+        .catch(() => setVoices(null));
 
       // Create a mapping object from the response
       const mappingObj: Record<string, string> = {};
@@ -141,6 +162,29 @@ const SpeakerRenameDialog: React.FC<SpeakerRenameDialogProps> = ({
 
   const speakers = Object.keys(speakerMappings).sort();
 
+  const scanVoices = async () => {
+    const res = await fetch(`/api/v1/transcription/${transcriptionId}/voices/scan`, { method: 'POST', headers: { ...getAuthHeaders() } });
+    if (res.ok) setScanQueued(true);
+  };
+
+  // Voice hint under a speaker: how it was named, or who it sounds like
+  const voiceHint = (speaker: string) => {
+    const named = voiceNamed[speaker];
+    if (named && speakerMappings[speaker] === named.custom_name) {
+      return <span>Named by voice ({(named.score ?? 0).toFixed(2)}). Edit to correct it.</span>;
+    }
+    const sv = voices?.speakers?.find(x => x.speaker === speaker);
+    const best = sv?.matches?.[0];
+    const threshold = voices?.threshold ?? 0.6;
+    if (!best || best.score < threshold - 0.15 || speakerMappings[speaker] === best.name) return null;
+    return (
+      <button type="button" className="text-[var(--brand-solid)] hover:underline"
+        onClick={() => handleSpeakerNameChange(speaker, best.name)}>
+        Sounds like {best.name} ({best.score.toFixed(2)}). Use this name
+      </button>
+    );
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -164,6 +208,25 @@ const SpeakerRenameDialog: React.FC<SpeakerRenameDialogProps> = ({
               </div>
             )}
 
+            {voices?.available && (voices.problems?.length ?? 0) > 0 && (
+              <div className="p-3 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm text-amber-700 dark:text-amber-300">
+                <p className="font-medium">Speakers may be wrong in this recording (flagged redo)</p>
+                <ul className="list-disc ml-5 mt-1">
+                  {voices.problems!.map((p, i) => <li key={i}>{p.text}</li>)}
+                </ul>
+              </div>
+            )}
+            {voices?.available && voices.status !== 'done' && speakers.length > 0 && (
+              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <AudioLines className="h-4 w-4" />
+                  {voices.status === 'failed' ? 'Voice scan failed.' : voices.status === 'queued' || voices.status === 'running' || scanQueued ? 'Voice scan queued.' : 'Not scanned for voices yet.'}
+                </span>
+                {!scanQueued && voices.status !== 'queued' && voices.status !== 'running' && (
+                  <Button size="sm" variant="outline" onClick={scanVoices}>Scan voices</Button>
+                )}
+              </div>
+            )}
             {speakers.length === 0 ? (
               <Card>
                 <CardContent className="pt-6 text-center text-muted-foreground">
@@ -188,6 +251,7 @@ const SpeakerRenameDialog: React.FC<SpeakerRenameDialogProps> = ({
                       placeholder={`Enter custom name for ${speaker}`}
                       className="transition-all duration-200 focus:ring-2 focus:ring-primary/20"
                     />
+                    {voiceHint(speaker) && <p className="text-xs text-muted-foreground">{voiceHint(speaker)}</p>}
                   </div>
                 ))}
               </div>
