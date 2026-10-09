@@ -498,6 +498,37 @@ func (h *Handler) ListTemplateLibrary(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
+// libraryModel picks the model for new library templates: the default
+// template's, else the default model in settings, else the model most
+// templates use. hasDefault reports whether a default template exists.
+func libraryModel(items []models.SummaryTemplate, settingsModel string) (model string, hasDefault bool) {
+	counts := map[string]int{}
+	for _, t := range items {
+		if t.IsDefault {
+			hasDefault = true
+			if strings.TrimSpace(t.Model) != "" {
+				model = t.Model
+			}
+		}
+		if m := strings.TrimSpace(t.Model); m != "" {
+			counts[m]++
+		}
+	}
+	if model != "" {
+		return model, hasDefault
+	}
+	if m := strings.TrimSpace(settingsModel); m != "" {
+		return m, hasDefault
+	}
+	best := 0
+	for m, n := range counts {
+		if n > best || (n == best && m < model) {
+			model, best = m, n
+		}
+	}
+	return model, hasDefault
+}
+
 // ApplyTemplateLibraryRequest names the library templates to install.
 type ApplyTemplateLibraryRequest struct {
 	Names []string `json:"names" binding:"required,min=1"`
@@ -505,7 +536,7 @@ type ApplyTemplateLibraryRequest struct {
 
 // ApplyTemplateLibrary installs or updates recommended templates
 // @Summary Install recommended templates
-// @Description Creates missing templates and updates installed ones (matched by name or an older name) in place: name, description, prompt, auto tags and speaker setting. Model, Reasoning and Default are kept. New templates use the default template's model.
+// @Description Creates missing templates and updates installed ones (matched by name or an older name) in place: name, description, prompt, auto tags and speaker setting. Model, Reasoning and Default are kept. New templates use the default template's model, else the settings default model, else the model most templates use.
 // @Tags summaries
 // @Accept json
 // @Produce json
@@ -527,18 +558,17 @@ func (h *Handler) ApplyTemplateLibrary(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list templates"})
 		return
 	}
-	model, hasDefault := "", false
-	for _, t := range items {
-		if t.IsDefault {
-			model, hasDefault = t.Model, true
-		}
-	}
-	if model == "" {
-		model = h.summarySettings(ctx).DefaultModel
-	}
+	model, hasDefault := libraryModel(items, h.summarySettings(ctx).DefaultModel)
 	want := map[string]bool{}
 	for _, n := range req.Names {
 		want[strings.ToLower(strings.TrimSpace(n))] = true
+	}
+	// Check before writing anything, so a request never stops half done.
+	for _, lib := range templateLibrary {
+		if want[strings.ToLower(lib.Name)] && findLibraryMatch(lib, items) == nil && model == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No model to use for new templates. Choose a model on any template (ideally the default) first."})
+			return
+		}
 	}
 	created, updated := 0, 0
 	for _, lib := range templateLibrary {
@@ -556,10 +586,6 @@ func (h *Handler) ApplyTemplateLibrary(c *gin.Context) {
 			}
 			updated++
 			continue
-		}
-		if model == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Choose a model on your default template first; new templates use it."})
-			return
 		}
 		t := &models.SummaryTemplate{Name: lib.Name, Description: &desc, Prompt: lib.Prompt, Model: model,
 			AutoTags: models.StringList(append([]string{}, lib.AutoTags...)), IncludeSpeakerInfo: lib.Speakers}

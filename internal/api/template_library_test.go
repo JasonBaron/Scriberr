@@ -46,3 +46,20 @@ func TestNewestSummary(t *testing.T) {
 		t.Errorf("got %s, want newest overall b", got)
 	}
 }
+
+func TestLibraryModel(t *testing.T) {
+	items := []models.SummaryTemplate{{Name: "A", Model: "llama3"}, {Name: "B", Model: "qwen3:8b"}, {Name: "C", Model: "qwen3:8b"}, {Name: "D", IsDefault: true}}
+	if m, def := libraryModel(items, ""); m != "qwen3:8b" || !def {
+		t.Errorf("most used: %q %v", m, def)
+	}
+	if m, _ := libraryModel(items, "gemma"); m != "gemma" {
+		t.Errorf("settings model: %q", m)
+	}
+	items[3].Model = "mistral"
+	if m, _ := libraryModel(items, "gemma"); m != "mistral" {
+		t.Errorf("default template model: %q", m)
+	}
+	if m, def := libraryModel(nil, ""); m != "" || def {
+		t.Errorf("empty: %q %v", m, def)
+	}
+}
