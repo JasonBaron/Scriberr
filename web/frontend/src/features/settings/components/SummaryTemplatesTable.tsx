@@ -9,16 +9,25 @@ import { useAuth } from "@/features/auth/hooks/useAuth";
 
 interface SummaryTemplatesTableProps {
   onEdit: (tpl: SummaryTemplate) => void;
+  onChanged?: () => void;
   refreshTrigger?: number;
   disabled?: boolean;
 }
 
-export function SummaryTemplatesTable({ onEdit, refreshTrigger = 0, disabled = false }: SummaryTemplatesTableProps) {
+export function SummaryTemplatesTable({ onEdit, onChanged, refreshTrigger = 0, disabled = false }: SummaryTemplatesTableProps) {
   const { getAuthHeaders } = useAuth();
   const [items, setItems] = useState<SummaryTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [openPop, setOpenPop] = useState<Record<string, boolean>>({});
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
+
+  const [models, setModels] = useState<string[]>([]);
+  useEffect(() => {
+    fetch('/api/v1/chat/models', { headers: { ...getAuthHeaders() } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => d && setModels(d.models || []))
+      .catch(() => { /* no provider yet */ });
+  }, [getAuthHeaders]);
 
   const fetchItems = useCallback(async () => {
     try {
@@ -52,15 +61,22 @@ export function SummaryTemplatesTable({ onEdit, refreshTrigger = 0, disabled = f
 
   const replaceItem = (tpl: SummaryTemplate) => setItems(prev => prev.map(i => (i.id === tpl.id ? tpl : i)));
 
-  const setEnabled = async (tpl: SummaryTemplate, enabled: boolean) => {
-    const res = await fetch(`/api/v1/summaries/${tpl.id}/enabled`, {
-      method: 'PUT',
+  const patch = async (tpl: SummaryTemplate, body: { model?: string; enabled?: boolean }) => {
+    const res = await fetch(`/api/v1/summaries/${tpl.id}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify({ enabled }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (res.ok) replaceItem(data); else alert(data?.error || 'Could not update the template');
+    if (res.ok) {
+      replaceItem(data);
+      onChanged?.();
+    } else {
+      alert(data?.error || 'Could not update the template');
+    }
   };
+  const setEnabled = (tpl: SummaryTemplate, enabled: boolean) => patch(tpl, { enabled });
+  const setModel = (tpl: SummaryTemplate, model: string) => patch(tpl, { model });
 
   const handleReset = async (tpl: SummaryTemplate) => {
     setOpenPop(prev => ({ ...prev, [tpl.id!]: false }));
@@ -115,14 +131,25 @@ export function SummaryTemplatesTable({ onEdit, refreshTrigger = 0, disabled = f
                   {tpl.reasoning && (
                     <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--bg-main)] text-[var(--text-tertiary)] border border-[var(--border-subtle)]">Reasoning</span>
                   )}
-                  <span className="text-xs text-[var(--text-tertiary)] whitespace-nowrap">{tpl.model || 'no model'}</span>
                 </div>
                 {tpl.description && (
                   <p className="text-xs text-[var(--text-secondary)] truncate mt-1">{tpl.description}</p>
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <select
+                className="h-8 max-w-[11rem] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] px-2 text-xs text-[var(--text-primary)]"
+                value={tpl.model || ''}
+                onChange={(e) => setModel(tpl, e.target.value)}
+                disabled={disabled}
+                aria-label={`Model for ${tpl.name}`}
+                title="Model"
+              >
+                {!tpl.model && <option value="">No model</option>}
+                {tpl.model && !models.includes(tpl.model) && <option value={tpl.model}>{tpl.model}</option>}
+                {models.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
               <Switch
                 checked={tpl.enabled !== false}
                 onCheckedChange={(v) => setEnabled(tpl, v)}

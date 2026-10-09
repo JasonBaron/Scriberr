@@ -984,6 +984,15 @@ func (suite *APIHandlerTestSuite) TestTaggingSettingsAndLibrary() {
 	w = suite.makeAuthenticatedRequest("PUT", "/api/v1/summaries/"+def.ID+"/enabled", map[string]interface{}{"enabled": false}, false)
 	assert.Equal(t, 400, w.Code)
 
+	// Model can be changed on its own; empty is rejected
+	w = suite.makeAuthenticatedRequest("PATCH", "/api/v1/summaries/"+media.ID, map[string]interface{}{"model": "llama3"}, false)
+	assert.Equal(t, 200, w.Code)
+	assert.NoError(t, db.First(&media, "id = ?", media.ID).Error)
+	assert.Equal(t, "llama3", media.Model)
+	assert.False(t, media.IsEnabled(), "enabled untouched")
+	w = suite.makeAuthenticatedRequest("PATCH", "/api/v1/summaries/"+media.ID, map[string]interface{}{"model": " "}, false)
+	assert.Equal(t, 400, w.Code)
+
 	// Built-ins cannot be deleted; custom templates can
 	w = suite.makeAuthenticatedRequest("DELETE", "/api/v1/summaries/"+media.ID, nil, false)
 	assert.Equal(t, 409, w.Code)

@@ -168,20 +168,21 @@ export function Settings() {
                   Configure an LLM provider in the LLMs tab to enable summary templates and model selection.
                 </div>
               )}
-              <SummaryTemplatesTable onEdit={(tpl) => { setEditingSummary(tpl); setSummaryDialogOpen(true); }} refreshTrigger={summaryRefresh} disabled={!llmConfigured} />
+              <SummaryTemplatesTable onEdit={(tpl) => { setEditingSummary(tpl); setSummaryDialogOpen(true); }} onChanged={() => queryClient.invalidateQueries({ queryKey: ["summaryTemplates"] })} refreshTrigger={summaryRefresh} disabled={!llmConfigured} />
             </div>
 
             <SummaryTemplateDialog
               open={summaryDialogOpen}
               onOpenChange={(o) => { setSummaryDialogOpen(o); if (!o) setEditingSummary(null); }}
               initial={editingSummary}
+              onRemoved={() => { queryClient.invalidateQueries({ queryKey: ["summaryTemplates"] }); setSummaryRefresh((n) => n + 1); }}
               onSave={async (tpl) => {
                 const headers: HeadersInit = { 'Content-Type': 'application/json', ...getAuthHeaders() };
                 try {
                   if (tpl.id) {
-                    await fetch(`/api/v1/summaries/${tpl.id}`, { method: 'PUT', headers, body: JSON.stringify({ name: tpl.name, description: tpl.description, model: tpl.model, prompt: tpl.prompt, include_speaker_info: tpl.include_speaker_info, reasoning: tpl.reasoning, is_default: tpl.is_default, auto_tags: tpl.auto_tags }) });
+                    await fetch(`/api/v1/summaries/${tpl.id}`, { method: 'PUT', headers, body: JSON.stringify({ name: tpl.name, description: tpl.description, model: tpl.model, prompt: tpl.prompt, include_speaker_info: tpl.include_speaker_info, reasoning: tpl.reasoning, is_default: tpl.is_default, auto_tags: tpl.auto_tags, enabled: tpl.enabled }) });
                   } else {
-                    await fetch('/api/v1/summaries', { method: 'POST', headers, body: JSON.stringify({ name: tpl.name, description: tpl.description, model: tpl.model, prompt: tpl.prompt, include_speaker_info: tpl.include_speaker_info, reasoning: tpl.reasoning, is_default: tpl.is_default, auto_tags: tpl.auto_tags }) });
+                    await fetch('/api/v1/summaries', { method: 'POST', headers, body: JSON.stringify({ name: tpl.name, description: tpl.description, model: tpl.model, prompt: tpl.prompt, include_speaker_info: tpl.include_speaker_info, reasoning: tpl.reasoning, is_default: tpl.is_default, auto_tags: tpl.auto_tags, enabled: tpl.enabled }) });
                   }
                 } finally {
                   // Invalidate cache to propagate changes

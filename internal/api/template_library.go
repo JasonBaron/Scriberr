@@ -686,29 +686,35 @@ func (h *Handler) ResetSummaryTemplate(c *gin.Context) {
 	c.JSON(http.StatusOK, out[0])
 }
 
-// SetTemplateEnabledRequest turns a template on or off.
-type SetTemplateEnabledRequest struct {
-	Enabled *bool `json:"enabled" binding:"required"`
+// PatchTemplateRequest changes the fields that are set: the model and
+// whether the template is on.
+type PatchTemplateRequest struct {
+	Model   *string `json:"model"`
+	Enabled *bool   `json:"enabled"`
 }
 
-// SetSummaryTemplateEnabled enables or disables a template
-// @Summary Enable or disable a template
+// PatchSummaryTemplate changes a template's model or on/off state
+// @Summary Change a template's model or on/off state
 // @Description Disabled templates are kept but never run automatically and are hidden from the Summarize dialog. The default template cannot be disabled.
 // @Tags summaries
 // @Accept json
 // @Produce json
 // @Param id path string true "Template ID"
-// @Param request body SetTemplateEnabledRequest true "Enabled"
+// @Param request body PatchTemplateRequest true "Fields to change"
 // @Success 200 {object} models.SummaryTemplate
 // @Failure 400 {object} map[string]string
 // @Failure 404 {object} map[string]string
 // @Security ApiKeyAuth
 // @Security BearerAuth
-// @Router /api/v1/summaries/{id}/enabled [put]
-func (h *Handler) SetSummaryTemplateEnabled(c *gin.Context) {
-	var req SetTemplateEnabledRequest
+// @Router /api/v1/summaries/{id} [patch]
+func (h *Handler) PatchSummaryTemplate(c *gin.Context) {
+	var req PatchTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Model == nil && req.Enabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Nothing to change: send model or enabled"})
 		return
 	}
 	ctx := c.Request.Context()
@@ -717,12 +723,22 @@ func (h *Handler) SetSummaryTemplateEnabled(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Template not found"})
 		return
 	}
-	if t.IsDefault && !*req.Enabled {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "The default template cannot be disabled. Make another template the default first."})
-		return
+	if req.Model != nil {
+		m := strings.TrimSpace(*req.Model)
+		if m == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Model cannot be empty"})
+			return
+		}
+		t.Model = m
 	}
-	v := *req.Enabled
-	t.Enabled = &v
+	if req.Enabled != nil {
+		if t.IsDefault && !*req.Enabled {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "The default template cannot be disabled. Make another template the default first."})
+			return
+		}
+		v := *req.Enabled
+		t.Enabled = &v
+	}
 	if err := h.summaryRepo.Update(ctx, t); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update template"})
 		return
@@ -731,6 +747,20 @@ func (h *Handler) SetSummaryTemplateEnabled(c *gin.Context) {
 	annotateTemplates(out)
 	c.JSON(http.StatusOK, out[0])
 }
+
+// SetSummaryTemplateEnabled enables or disables a template
+// @Summary Enable or disable a template
+// @Description Same as PATCH /api/v1/summaries/{id} with only "enabled".
+// @Tags summaries
+// @Accept json
+// @Produce json
+// @Param id path string true "Template ID"
+// @Param request body PatchTemplateRequest true "Enabled"
+// @Success 200 {object} models.SummaryTemplate
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /api/v1/summaries/{id}/enabled [put]
+func (h *Handler) SetSummaryTemplateEnabled(c *gin.Context) { h.PatchSummaryTemplate(c) }
 
 // sortTemplates orders templates: the default, then built-ins in shipped
 // order, then the rest by name.

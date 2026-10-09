@@ -29,9 +29,11 @@ interface SummaryTemplateDialogProps {
   onOpenChange: (open: boolean) => void;
   onSave: (tpl: Omit<SummaryTemplate, 'created_at' | 'updated_at'>) => Promise<void> | void;
   initial?: SummaryTemplate | null;
+  // Called after the template was deleted or reset from the dialog.
+  onRemoved?: () => void;
 }
 
-export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial }: SummaryTemplateDialogProps) {
+export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial, onRemoved }: SummaryTemplateDialogProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
@@ -40,6 +42,8 @@ export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial }: S
   const [reasoning, setReasoning] = useState(false);
   const [isDefault, setIsDefault] = useState(false);
   const [autoTags, setAutoTags] = useState("");
+  const [enabled, setEnabled] = useState(true);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const { getAuthHeaders } = useAuth();
@@ -54,6 +58,8 @@ export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial }: S
       setReasoning(initial?.reasoning || false);
       setIsDefault(initial?.is_default || false);
       setAutoTags((initial?.auto_tags || []).join(", "));
+      setEnabled(initial?.enabled !== false);
+      setActionError(null);
       // Load models when dialog opens
       (async () => {
         try {
@@ -83,7 +89,8 @@ export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial }: S
         include_speaker_info: includeSpeakerInfo,
         reasoning,
         is_default: isDefault,
-        auto_tags: autoTags.split(",").map(t => t.trim()).filter(Boolean)
+        auto_tags: autoTags.split(",").map(t => t.trim()).filter(Boolean),
+        enabled: isDefault ? true : enabled,
       });
       onOpenChange(false);
     } finally {
@@ -92,6 +99,28 @@ export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial }: S
   };
 
   const isFormValid = name.trim() && prompt.trim() && model.trim();
+
+  // Built-in templates are reset; templates you made are deleted.
+  const removeOrReset = async () => {
+    if (!initial?.id) return;
+    const builtin = !!initial.builtin_key;
+    const ok = window.confirm(builtin
+      ? `Reset "${initial.name}" to the shipped version? Model, Reasoning and on/off are kept.`
+      : `Delete "${initial.name}"? Its existing summaries are kept.`);
+    if (!ok) return;
+    setActionError(null);
+    const res = await fetch(builtin ? `/api/v1/summaries/${initial.id}/reset` : `/api/v1/summaries/${initial.id}`, {
+      method: builtin ? 'POST' : 'DELETE',
+      headers: { ...getAuthHeaders() },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      setActionError(data?.error || (builtin ? 'Could not reset' : 'Could not delete'));
+      return;
+    }
+    onRemoved?.();
+    onOpenChange(false);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -206,10 +235,36 @@ Summarize the following transcript into concise bullet points. Focus on key deci
             checked={isDefault}
             onCheckedChange={setIsDefault}
           />
+
+          {/* Enabled Toggle */}
+          <div className="space-y-1">
+            <SwitchField
+              id="templateEnabled"
+              label="Enabled"
+              checked={isDefault || enabled}
+              onCheckedChange={setEnabled}
+              disabled={isDefault}
+            />
+            <p className="text-xs text-[var(--text-tertiary)] pl-12">
+              {isDefault ? "The default template is always on." : "Off: kept, but never runs automatically and hidden from the Summarize dialog."}
+            </p>
+          </div>
         </div>
 
         {/* Footer */}
         <DialogFooter className="px-6 py-4 border-t border-[var(--border-subtle)] gap-3 sm:gap-2">
+          {initial?.id && (
+            <div className="sm:mr-auto flex items-center gap-2">
+              <Button
+                variant="ghost"
+                onClick={removeOrReset}
+                className={`rounded-xl cursor-pointer ${initial.builtin_key ? 'text-[var(--text-secondary)] hover:bg-[var(--bg-main)]' : 'text-[var(--error)] hover:bg-[var(--error)]/10'}`}
+              >
+                {initial.builtin_key ? 'Reset to default' : 'Delete'}
+              </Button>
+              {actionError && <span className="text-xs text-[var(--error)]">{actionError}</span>}
+            </div>
+          )}
           <Button
             variant="ghost"
             onClick={() => onOpenChange(false)}
