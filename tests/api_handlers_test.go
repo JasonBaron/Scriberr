@@ -833,6 +833,218 @@ func (suite *APIHandlerTestSuite) TestRecordingFolders() {
 	assert.Equal(t, filepath.Join(root, store.FolderName(plainJob.ID, time.Now()), "audio.wav"), renamed.AudioPath)
 }
 
+// Test the bulk summary run API (the worker is not started in tests, so
+// tasks stay queued)
+func (suite *APIHandlerTestSuite) TestSummaryRunAPI() {
+	t := suite.T()
+	db := suite.helper.DB
+
+	w := suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/run", map[string]interface{}{}, false)
+	assert.Equal(t, 400, w.Code, "a selection is required")
+
+	tpl := &models.SummaryTemplate{Name: "Default", Model: "m", Prompt: "p", IsDefault: true}
+	assert.NoError(t, db.Create(tpl).Error)
+	therapy := &models.SummaryTemplate{Name: "Therapy", Model: "m", Prompt: "p", AutoTags: models.StringList{"therapy"}}
+	assert.NoError(t, db.Create(therapy).Error)
+
+	tr := `{"text":"hello"}`
+	done := models.TranscriptionJob{ID: "run-done", AudioPath: "a.wav", Status: models.StatusCompleted, Transcript: &tr, Tags: models.StringList{"therapy"}}
+	other := models.TranscriptionJob{ID: "run-other", AudioPath: "b.wav", Status: models.StatusCompleted, Transcript: &tr}
+	pending := models.TranscriptionJob{ID: "run-pending", AudioPath: "c.wav", Status: models.StatusPending}
+	assert.NoError(t, db.Create(&done).Error)
+	assert.NoError(t, db.Create(&other).Error)
+	assert.NoError(t, db.Create(&pending).Error)
+
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/run", map[string]interface{}{"tag": "therapy", "dry_run": true}, false)
+	assert.Equal(t, 200, w.Code)
+	var dry api.SummaryRunResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &dry))
+	assert.Equal(t, []string{"run-done"}, dry.JobIDs)
+	assert.Equal(t, 0, dry.Queued)
+
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/run", map[string]interface{}{"missing_only": true}, false)
+	assert.Equal(t, 202, w.Code)
+	var run api.SummaryRunResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &run))
+	assert.Equal(t, 2, run.Matched, "only completed, transcribed recordings")
+	assert.Equal(t, 2, run.Queued)
+	assert.Equal(t, "Default", run.Template)
+
+	var job models.TranscriptionJob
+	assert.NoError(t, db.First(&job, "id = ?", "run-done").Error)
+	assert.Equal(t, models.SummaryQueued, job.SummaryStatus)
+
+	w = suite.makeAuthenticatedRequest("GET", "/api/v1/summaries/run", nil, false)
+	var st api.SummaryRunStatus
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &st))
+	assert.True(t, st.Running)
+	assert.Equal(t, 2, st.Queued)
+
+	w = suite.makeAuthenticatedRequest("DELETE", "/api/v1/summaries/run", nil, false)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), `"cancelled":2`)
+	var cleared models.TranscriptionJob
+	assert.NoError(t, db.First(&cleared, "id = ?", "run-done").Error)
+	assert.Empty(t, cleared.SummaryStatus)
+
+	// Template auto_tags round-trip through the API, cleaned
+	w = suite.makeAuthenticatedRequest("PUT", "/api/v1/summaries/"+therapy.ID, map[string]interface{}{
+		"name": "Therapy", "model": "m", "prompt": "p", "auto_tags": []string{" Therapy ", "#Counseling"},
+	}, false)
+	assert.Equal(t, 200, w.Code)
+	var updated models.SummaryTemplate
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &updated))
+	assert.Equal(t, models.StringList{"therapy", "counseling"}, updated.AutoTags)
+}
+
+// Test tag vocabulary settings, the template library and retag selection
+func (suite *APIHandlerTestSuite) TestTaggingSettingsAndLibrary() {
+	t := suite.T()
+	db := suite.helper.DB
+	db.Exec("DELETE FROM summary_templates")
+	db.Exec("DELETE FROM summary_settings")
+
+	// Defaults are returned before anything is saved
+	w := suite.makeAuthenticatedRequest("GET", "/api/v1/summaries/settings", nil, false)
+	assert.Equal(t, 200, w.Code)
+	var st api.SummarySettingsResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &st))
+	assert.True(t, st.TagStrict)
+	assert.True(t, st.RedactPII)
+	assert.Equal(t, st.DefaultTagTypes, st.TagTypes)
+	assert.Equal(t, 9, st.TypeCount)
+	assert.Equal(t, 2, st.TagKeywords, "two free-form keywords by default")
+	assert.Contains(t, st.TagNameHints, "= individual therapy", "name hints default")
+	assert.Contains(t, st.TagTitlePrefixes, "individual therapy = Therapy", "title labels default")
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{"tag_keywords": 9}, false)
+	assert.Equal(t, 400, w.Code)
+
+	// Custom topics are saved; types equal to the default stay default
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{
+		"owner_name": " Jason ", "tag_types": st.DefaultTagTypes, "tag_topics": "gardening: plants\n!money: finances",
+	}, false)
+	assert.Equal(t, 200, w.Code)
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &st))
+	assert.Equal(t, "Jason", st.OwnerName)
+	assert.Equal(t, 2, st.TopicCount)
+	var saved models.SummarySetting
+	assert.NoError(t, db.First(&saved).Error)
+	assert.Empty(t, saved.TagTypes, "default list stored as empty")
+
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{"tag_topics": "# nothing"}, false)
+	assert.Equal(t, 400, w.Code, "an empty topic list is rejected")
+
+	// Built-in templates are added on startup. Older templates with the same
+	// or a former name are linked, keeping their content and model.
+	ctx := context.Background()
+	def := &models.SummaryTemplate{Name: "Default", Model: "qwen3:8b", Prompt: "p"}
+	assert.NoError(t, db.Create(def).Error)
+	assert.NoError(t, db.Create(&models.SummaryTemplate{Name: "My Notes", Model: "qwen3:8b", Prompt: "mine"}).Error)
+	old := &models.SummaryTemplate{Name: "Therapy Discussion - Single", Model: "other", Prompt: "old", Reasoning: true}
+	assert.NoError(t, db.Create(old).Error)
+
+	suite.handler.SeedTemplates(ctx)
+	suite.handler.SeedTemplates(ctx) // idempotent
+	var all []models.SummaryTemplate
+	assert.NoError(t, db.Find(&all).Error)
+	assert.Len(t, all, 13, "12 built-in (2 linked) plus one custom")
+
+	var linked models.SummaryTemplate
+	assert.NoError(t, db.First(&linked, "id = ?", old.ID).Error)
+	assert.Equal(t, "individual-therapy", linked.BuiltinKey)
+	assert.Equal(t, "old", linked.Prompt, "linking keeps the content")
+	assert.NoError(t, db.First(def, "id = ?", def.ID).Error)
+	assert.True(t, def.IsDefault, "the built-in Default becomes the default when none is marked")
+	var media models.SummaryTemplate
+	assert.NoError(t, db.First(&media, "builtin_key = ?", "media-notes").Error)
+	assert.Equal(t, "qwen3:8b", media.Model, "new templates use the model in use")
+	assert.True(t, media.IsEnabled())
+
+	w = suite.makeAuthenticatedRequest("GET", "/api/v1/summaries/", nil, false)
+	assert.Equal(t, 200, w.Code)
+	var listed []models.SummaryTemplate
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &listed))
+	assert.Equal(t, def.ID, listed[0].ID, "default first")
+	byKey := map[string]models.SummaryTemplate{}
+	for _, it := range listed {
+		byKey[it.BuiltinKey] = it
+	}
+	assert.True(t, byKey["individual-therapy"].Customized)
+	assert.False(t, byKey["media-notes"].Customized)
+
+	// Reset restores the shipped content and keeps model and reasoning
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/"+old.ID+"/reset", nil, false)
+	assert.Equal(t, 200, w.Code)
+	assert.NoError(t, db.First(&linked, "id = ?", old.ID).Error)
+	assert.Equal(t, "Individual Therapy Session", linked.Name)
+	assert.Equal(t, models.StringList{"individual therapy"}, linked.AutoTags)
+	assert.Equal(t, "other", linked.Model)
+	assert.True(t, linked.Reasoning)
+
+	// Enable and disable; the default stays enabled
+	w = suite.makeAuthenticatedRequest("PUT", "/api/v1/summaries/"+media.ID+"/enabled", map[string]interface{}{"enabled": false}, false)
+	assert.Equal(t, 200, w.Code)
+	assert.NoError(t, db.First(&media, "id = ?", media.ID).Error)
+	assert.False(t, media.IsEnabled())
+	w = suite.makeAuthenticatedRequest("PUT", "/api/v1/summaries/"+def.ID+"/enabled", map[string]interface{}{"enabled": false}, false)
+	assert.Equal(t, 400, w.Code)
+
+	// Model can be changed on its own; empty is rejected
+	w = suite.makeAuthenticatedRequest("PATCH", "/api/v1/summaries/"+media.ID, map[string]interface{}{"model": "llama3"}, false)
+	assert.Equal(t, 200, w.Code)
+	assert.NoError(t, db.First(&media, "id = ?", media.ID).Error)
+	assert.Equal(t, "llama3", media.Model)
+	assert.False(t, media.IsEnabled(), "enabled untouched")
+	w = suite.makeAuthenticatedRequest("PATCH", "/api/v1/summaries/"+media.ID, map[string]interface{}{"model": " "}, false)
+	assert.Equal(t, 400, w.Code)
+
+	// Built-ins cannot be deleted; custom templates can
+	w = suite.makeAuthenticatedRequest("DELETE", "/api/v1/summaries/"+media.ID, nil, false)
+	assert.Equal(t, 409, w.Code)
+	var mine models.SummaryTemplate
+	assert.NoError(t, db.First(&mine, "name = ?", "My Notes").Error)
+	w = suite.makeAuthenticatedRequest("DELETE", "/api/v1/summaries/"+mine.ID, nil, false)
+	assert.Equal(t, 204, w.Code)
+
+	// From nothing: templates are added with the settings model
+	db.Exec("DELETE FROM summary_templates")
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{"default_model": "llama3"}, false)
+	assert.Equal(t, 200, w.Code)
+	suite.handler.SeedTemplates(ctx)
+	var fresh []models.SummaryTemplate
+	assert.NoError(t, db.Find(&fresh).Error)
+	assert.Len(t, fresh, 12)
+	// A fresh variable: reusing def would add its old ID to the query
+	var freshDef models.SummaryTemplate
+	assert.NoError(t, db.First(&freshDef, "builtin_key = ?", "default").Error)
+	assert.True(t, freshDef.IsDefault)
+	assert.Equal(t, "llama3", freshDef.Model)
+	def = &freshDef
+
+	// Retag selects summarized recordings and skips hand-edited tags
+	tr := `{"text":"hello"}`
+	a := models.TranscriptionJob{ID: "retag-a", AudioPath: "a.wav", Status: models.StatusCompleted, Transcript: &tr}
+	b := models.TranscriptionJob{ID: "retag-b", AudioPath: "b.wav", Status: models.StatusCompleted, Transcript: &tr, TagsEdited: true}
+	c := models.TranscriptionJob{ID: "retag-c", AudioPath: "c.wav", Status: models.StatusCompleted, Transcript: &tr}
+	for _, j := range []*models.TranscriptionJob{&a, &b, &c} {
+		assert.NoError(t, db.Create(j).Error)
+	}
+	for _, id := range []string{"retag-a", "retag-b"} {
+		assert.NoError(t, db.Create(&models.Summary{TranscriptionID: id, TemplateID: &def.ID, Model: "m", Content: "s"}).Error)
+	}
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/run", map[string]interface{}{"retag": true, "dry_run": true}, false)
+	assert.Equal(t, 200, w.Code)
+	var dry api.SummaryRunResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &dry))
+	assert.Equal(t, []string{"retag-a"}, dry.JobIDs)
+	assert.Equal(t, "Retag", dry.Template)
+	assert.Equal(t, 1, dry.SkippedEdited, "the hand-edited recording is reported")
+
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/run", map[string]interface{}{"retag": true, "include_edited": true, "dry_run": true}, false)
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &dry))
+	assert.ElementsMatch(t, []string{"retag-a", "retag-b"}, dry.JobIDs)
+}
+
 // Test error responses for non-existent resources
 func (suite *APIHandlerTestSuite) TestNotFoundErrors() {
 	endpoints := []string{

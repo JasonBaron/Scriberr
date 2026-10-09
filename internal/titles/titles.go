@@ -284,3 +284,51 @@ func CleanUserTags(tags []string) []string {
 	}
 	return out
 }
+
+// TagMatches reports whether tag contains want as whole words, ignoring
+// case, spacing and singular/plural: "therapy" matches "couples therapy",
+// "relationship" matches "relationships", "art" does not match "party".
+func TagMatches(want, tag string) bool {
+	w := strings.Fields(NormalizeTag(want))
+	t := strings.Fields(NormalizeTag(tag))
+	if len(w) == 0 || len(w) > len(t) {
+		return false
+	}
+	for i := 0; i+len(w) <= len(t); i++ {
+		ok := true
+		for j := range w {
+			if !sameWord(w[j], t[i+j]) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
+func sameWord(a, b string) bool {
+	if a == b {
+		return true
+	}
+	for _, v := range variants(a) {
+		if v == b {
+			return true
+		}
+	}
+	return false
+}
+
+// YouTube titles a downloaded video "<date> YouTube: <video title>".
+func YouTube(date time.Time, videoTitle string) string {
+	t := strings.Join(strings.Fields(videoTitle), " ")
+	if t == "" || strings.EqualFold(t, "YouTube Audio") {
+		t = "Video"
+	}
+	if len(t) > 120 {
+		t = strings.TrimSpace(t[:120]) + "…"
+	}
+	return date.Format("2006-01-02") + " YouTube: " + t
+}

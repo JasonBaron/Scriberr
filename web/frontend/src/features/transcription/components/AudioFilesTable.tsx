@@ -48,6 +48,7 @@ const JobStatusMonitor = memo(function JobStatusMonitor({ jobId }: { jobId: stri
 import { DebouncedSearchInput } from "@/components/DebouncedSearchInput";
 import { SwipeableItem } from "@/components/ui/swipeable-item";
 import { useSwipeHint } from "@/hooks/use-swipe-hint";
+import { flagTagClass } from "../utils/tagStyle";
 
 
 
@@ -857,13 +858,13 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 													</>
 												)}
 											</div>
-											{file.tags && file.tags.length > 0 && (
+											{((file.tags?.length ?? 0) + (file.flags?.length ?? 0)) > 0 && (
 												<div className="flex flex-wrap gap-1 mt-1.5">
-													{file.tags.map(tag => (
+													{[...(file.tags || []).map(t => ({ t, flag: false })), ...(file.flags || []).map(t => ({ t, flag: true }))].map(({ t: tag, flag }) => (
 														<button
-															key={tag}
+															key={(flag ? "flag:" : "") + tag}
 															type="button"
-															title={globalFilter === tag ? "Clear tag filter" : `Show recordings tagged ${tag}`}
+															title={globalFilter === tag ? "Clear filter" : flag ? `Show recordings flagged ${tag}` : `Show recordings tagged ${tag}`}
 															onClick={(e) => { e.stopPropagation(); setGlobalFilter(globalFilter === tag ? "" : tag); }}
 															onMouseDown={(e) => e.stopPropagation()}
 															onTouchStart={(e) => e.stopPropagation()}
@@ -871,7 +872,8 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 																"text-[11px] leading-none px-2 py-1 rounded-full border transition-colors",
 																globalFilter === tag
 																	? "border-[#FF6D20] text-[#FF6D20] bg-orange-50 dark:bg-orange-950"
-																	: "border-[var(--border-subtle)] text-gray-500 hover:border-[#FF6D20] hover:text-[#FF6D20]"
+																	: flagTagClass(tag) || "border-[var(--border-subtle)] text-gray-500 hover:border-[#FF6D20] hover:text-[#FF6D20]",
+																flag && "ml-1"
 															)}
 														>
 															{tag}

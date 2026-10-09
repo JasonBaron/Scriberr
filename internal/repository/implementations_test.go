@@ -85,6 +85,13 @@ func TestSaveSuggestions(t *testing.T) {
 	require.Equal(t, "2026-10-08 Hiring plan", *j2.Title, "a placeholder title is replaced")
 	require.Equal(t, models.StringList{"mine"}, j3.Tags, "edited tags are kept")
 	require.Equal(t, models.StringList{"generated"}, j3.SuggestedTags)
+
+	// Retagging with "include hand-edited" replaces them and clears the mark
+	require.NoError(t, repo.SaveSuggestions(ctx, "3", models.JobSuggestion{Title: "x", Tags: models.StringList{"conversation"}, OverwriteEditedTags: true}, false))
+	var j3b models.TranscriptionJob
+	require.NoError(t, db.First(&j3b, "id = ?", "3").Error)
+	require.Equal(t, models.StringList{"conversation"}, j3b.Tags)
+	require.False(t, j3b.TagsEdited)
 }
 
 func TestSetTagsAndTagCounts(t *testing.T) {
@@ -217,4 +224,69 @@ func TestSummaryStatus(t *testing.T) {
 	require.EqualValues(t, 1, n)
 	require.NoError(t, db.First(&j, "id = ?", "1").Error)
 	require.Empty(t, j.SummaryStatus)
+}
+
+func TestSummaryRunCandidates(t *testing.T) {
+	_, db := newTestJobRepository(t)
+	require.NoError(t, db.AutoMigrate(&models.SummaryTemplate{}, &models.Summary{}))
+	repo := NewSummaryRepository(db)
+	ctx := context.Background()
+	tr := "{}"
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "1", AudioPath: "a", Status: models.StatusCompleted, Transcript: &tr, Tags: models.StringList{"therapy"}}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "2", AudioPath: "b", Status: models.StatusCompleted, Transcript: &tr}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "3", AudioPath: "c", Status: models.StatusFailed, Transcript: &tr}).Error)
+	tpl := "tpl"
+	require.NoError(t, repo.SaveSummary(ctx, &models.Summary{TranscriptionID: "2", TemplateID: &tpl, Model: "m", Content: "x"}))
+
+	all, err := repo.SummaryRunCandidates(ctx, SummaryRunFilter{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"1", "2"}, all)
+
+	missing, err := repo.SummaryRunCandidates(ctx, SummaryRunFilter{MissingOnly: true})
+	require.NoError(t, err)
+	require.Equal(t, []string{"1"}, missing)
+
+	tagged, err := repo.SummaryRunCandidates(ctx, SummaryRunFilter{Tag: "therapy"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"1"}, tagged)
+
+	has, err := repo.HasTemplateSummary(ctx, "2", "tpl")
+	require.NoError(t, err)
+	require.True(t, has)
+	has, _ = repo.HasTemplateSummary(ctx, "1", "tpl")
+	require.False(t, has)
+}
+
+func TestMoveTagsToFlags(t *testing.T) {
+	_, db := newTestJobRepository(t)
+	require.NoError(t, db.AutoMigrate(&models.SummaryTemplate{}, &models.Summary{}))
+	repo := NewSummaryRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "f1", AudioPath: "a", Tags: models.StringList{"conversation", "sensitive", "family", "pii"}}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "f2", AudioPath: "b", Tags: models.StringList{"conversation"}}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "f3", AudioPath: "c", Tags: models.StringList{"sensitive"}, Flags: models.StringList{"sensitive"}}).Error)
+
+	n, err := repo.MoveTagsToFlags(ctx, []string{"sensitive", "pii"})
+	require.NoError(t, err)
+	require.Equal(t, 2, n)
+	n, err = repo.MoveTagsToFlags(ctx, []string{"sensitive", "pii"})
+	require.NoError(t, err)
+	require.Equal(t, 0, n, "nothing left to move")
+
+	var f1, f3 models.TranscriptionJob
+	require.NoError(t, db.First(&f1, "id = ?", "f1").Error)
+	require.NoError(t, db.First(&f3, "id = ?", "f3").Error)
+	require.Equal(t, models.StringList{"conversation", "family"}, f1.Tags)
+	require.Equal(t, models.StringList{"sensitive", "pii"}, f1.Flags)
+	require.Empty(t, f3.Tags)
+	require.Equal(t, models.StringList{"sensitive"}, f3.Flags, "no duplicate flag")
+
+	// Flags are saved even when the tags were edited by hand
+	require.NoError(t, db.Model(&models.TranscriptionJob{}).Where("id = ?", "f2").Update("tags_edited", true).Error)
+	require.NoError(t, repo.SaveSuggestions(ctx, "f2", models.JobSuggestion{Title: "x", Tags: models.StringList{"new"}, Flags: models.StringList{"pii"}}, false))
+	var f2 models.TranscriptionJob
+	require.NoError(t, db.First(&f2, "id = ?", "f2").Error)
+	require.Equal(t, models.StringList{"conversation"}, f2.Tags)
+	require.Equal(t, models.StringList{"pii"}, f2.Flags)
 }

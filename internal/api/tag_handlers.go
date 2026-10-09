@@ -66,5 +66,8 @@ func (h *Handler) UpdateTranscriptionTags(c *gin.Context) {
 		return
 	}
 	h.SyncRecordingAsync(c.Param("id"))
+	if settings, err := h.summaryRepo.GetSettings(c.Request.Context()); err == nil && settings.AutoSummarize {
+		h.queueTagTemplates(c.Request.Context(), c.Param("id"), "tag edit")
+	}
 	c.JSON(http.StatusOK, gin.H{"id": c.Param("id"), "tags": tags})
 }

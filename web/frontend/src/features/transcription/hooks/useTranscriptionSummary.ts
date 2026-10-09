@@ -10,6 +10,7 @@ export interface SummaryTemplate {
     include_speaker_info?: boolean;
     reasoning?: boolean;
     is_default?: boolean;
+    enabled?: boolean;
 }
 
 const LAST_TEMPLATE_KEY = "scriberr.summary.lastTemplateId";

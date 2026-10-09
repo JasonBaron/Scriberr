@@ -51,7 +51,7 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 			c.Header("Access-Control-Allow-Origin", allowOrigin)
 			c.Header("Access-Control-Allow-Credentials", "true")
 		}
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-API-Key")
 
 		if c.Request.Method == "OPTIONS" {
@@ -215,6 +215,12 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 			summaries.GET("/:id", handler.GetSummaryTemplate)
 			summaries.PUT("/:id", handler.UpdateSummaryTemplate)
 			summaries.DELETE("/:id", handler.DeleteSummaryTemplate)
+			summaries.GET("/run", handler.GetSummaryRun)
+			summaries.POST("/run", handler.StartSummaryRun)
+			summaries.DELETE("/run", handler.CancelSummaryRun)
+			summaries.POST("/:id/reset", handler.ResetSummaryTemplate)
+			summaries.PUT("/:id/enabled", handler.SetSummaryTemplateEnabled)
+			summaries.PATCH("/:id", handler.PatchSummaryTemplate)
 			summaries.GET("/settings", handler.GetSummarySettings)
 			summaries.POST("/settings", handler.SaveSummarySettings)
 		}

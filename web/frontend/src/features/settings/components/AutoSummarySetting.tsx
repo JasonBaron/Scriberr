@@ -14,6 +14,8 @@ export function AutoSummarySetting({ disabled = false }: AutoSummarySettingProps
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [defaultModel, setDefaultModel] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -22,12 +24,35 @@ export function AutoSummarySetting({ disabled = false }: AutoSummarySettingProps
         if (res.ok) {
           const data = await res.json();
           setEnabled(!!data.auto_summarize);
+          setDefaultModel(data.default_model || "");
         }
       } finally {
         setLoaded(true);
       }
     })();
   }, [getAuthHeaders]);
+
+  useEffect(() => {
+    fetch('/api/v1/chat/models', { headers: { ...getAuthHeaders() } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => d && setModels(d.models || []))
+      .catch(() => { /* no provider yet */ });
+  }, [getAuthHeaders]);
+
+  const saveModel = async (m: string) => {
+    const prev = defaultModel;
+    setDefaultModel(m);
+    setError(null);
+    const res = await fetch('/api/v1/summaries/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ default_model: m }),
+    });
+    if (!res.ok) {
+      setDefaultModel(prev);
+      setError('Could not save the model.');
+    }
+  };
 
   const toggle = async (next: boolean) => {
     setSaving(true);
@@ -49,7 +74,8 @@ export function AutoSummarySetting({ disabled = false }: AutoSummarySettingProps
   };
 
   return (
-    <div className="flex items-start justify-between gap-4 mb-6 pb-6 border-b border-[var(--border-subtle)]">
+    <div className="mb-6 pb-6 border-b border-[var(--border-subtle)] space-y-4">
+    <div className="flex items-start justify-between gap-4">
       <div>
         <label htmlFor="autoSummarize" className="text-sm font-medium text-[var(--text-primary)] cursor-pointer">
           Summarize automatically after transcription
@@ -66,6 +92,20 @@ export function AutoSummarySetting({ disabled = false }: AutoSummarySettingProps
         onCheckedChange={toggle}
         disabled={disabled || !loaded || saving}
       />
+    </div>
+    <label className="flex flex-wrap items-center gap-2 text-sm text-[var(--text-secondary)]">
+      Model for templates without one
+      <select
+        className="h-9 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] px-2 text-sm text-[var(--text-primary)]"
+        value={defaultModel}
+        onChange={e => saveModel(e.target.value)}
+        disabled={disabled || !loaded}
+        aria-label="Model for templates without one"
+      >
+        <option value="">Same as the default template</option>
+        {models.map(m => <option key={m} value={m}>{m}</option>)}
+      </select>
+    </label>
     </div>
   );
 }

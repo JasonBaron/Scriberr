@@ -123,6 +123,9 @@ func (s *OllamaService) requestOptions(ctx context.Context, model string, messag
 	opts := map[string]any{"num_ctx": s.numCtx(ctx, model, messages)}
 	if temperature > 0 {
 		opts["temperature"] = temperature
+	} else if DeterministicFrom(ctx) {
+		opts["temperature"] = 0
+		opts["seed"] = DeterministicSeed
 	}
 	return opts
 }

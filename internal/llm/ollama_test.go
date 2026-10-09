@@ -218,3 +218,29 @@ func TestUnloadAll(t *testing.T) {
 		t.Errorf("unloaded %v, server saw %v", got, unloads())
 	}
 }
+
+func TestDeterministicSendsTemperatureZeroAndSeed(t *testing.T) {
+	srv, requests := fakeOllama(t, 8192)
+	s := NewOllamaService(srv.URL)
+	msgs := []ChatMessage{{Role: "user", Content: "hi"}}
+
+	if _, err := s.ChatCompletion(context.Background(), "m", msgs, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ChatCompletion(WithDeterministic(context.Background()), "m", msgs, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ChatCompletion(WithDeterministic(context.Background()), "m", msgs, 0.7); err != nil {
+		t.Fatal(err)
+	}
+	got := requests()
+	if _, ok := got[0]["temperature"]; ok {
+		t.Errorf("plain request should use the model default temperature: %v", got[0])
+	}
+	if got[1]["temperature"] != float64(0) || got[1]["seed"] != float64(DeterministicSeed) {
+		t.Errorf("deterministic request: %v", got[1])
+	}
+	if got[2]["temperature"] != 0.7 {
+		t.Errorf("an explicit temperature wins: %v", got[2])
+	}
+}

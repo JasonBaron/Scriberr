@@ -182,7 +182,10 @@ func main() {
 
 	// Free Ollama's GPU memory before each transcription
 	gpu.OnBeforeTranscription(handler.UnloadLocalLLM)
+	handler.SeedTemplates(context.Background())
+	handler.MigrateFlags(context.Background())
 	handler.ResetSummaryStatuses(context.Background())
+	handler.StartSummaryWorker(context.Background())
 	queue.OnJobCompleted(handler.AutoSummarize)
 	go handler.BackfillFileHashes(context.Background())
 

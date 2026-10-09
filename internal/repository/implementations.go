@@ -123,7 +123,7 @@ func (r *jobRepository) ListWithParams(ctx context.Context, offset, limit int, s
 	// Apply search filter
 	if searchQuery != "" {
 		search := "%" + searchQuery + "%"
-		db = db.Where("title LIKE ? OR audio_path LIKE ? OR tags LIKE ?", search, search, search)
+		db = db.Where("title LIKE ? OR audio_path LIKE ? OR tags LIKE ? OR flags LIKE ?", search, search, search, search)
 	}
 
 	// Count total matching records
@@ -405,7 +405,10 @@ type SummaryRepository interface {
 	SetTags(ctx context.Context, jobID string, tags models.StringList) error
 	TagCounts(ctx context.Context) ([]TagCount, error)
 	SetSummaryStatus(ctx context.Context, jobID, status string) error
+	HasTemplateSummary(ctx context.Context, jobID, templateID string) (bool, error)
+	SummaryRunCandidates(ctx context.Context, f SummaryRunFilter) ([]string, error)
 	ClearSummaryStatuses(ctx context.Context) (int64, error)
+	MoveTagsToFlags(ctx context.Context, names []string) (int, error)
 }
 
 type summaryRepository struct {
@@ -733,6 +736,7 @@ func (r *summaryRepository) SaveSuggestions(ctx context.Context, jobID string, s
 		updates := map[string]interface{}{
 			"suggested_title": s.Title,
 			"suggested_tags":  s.Tags,
+			"flags":           s.Flags,
 		}
 		if s.Brief != "" {
 			updates["summary_brief"] = s.Brief
@@ -742,6 +746,10 @@ func (r *summaryRepository) SaveSuggestions(ctx context.Context, jobID string, s
 		}
 		if err := tx.Model(&models.TranscriptionJob{}).Where("id = ?", jobID).Updates(updates).Error; err != nil {
 			return err
+		}
+		if s.OverwriteEditedTags {
+			return tx.Model(&models.TranscriptionJob{}).Where("id = ?", jobID).
+				Updates(map[string]interface{}{"tags": s.Tags, "tags_edited": false}).Error
 		}
 		return tx.Model(&models.TranscriptionJob{}).
 			Where("id = ? AND (tags_edited = ? OR tags_edited IS NULL)", jobID, false).
@@ -767,6 +775,109 @@ func (r *summaryRepository) SetTags(ctx context.Context, jobID string, tags mode
 func (r *summaryRepository) SetSummaryStatus(ctx context.Context, jobID, status string) error {
 	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).
 		Update("summary_status", status).Error
+}
+
+// HasTemplateSummary reports whether a job already has a summary from the
+// given template.
+func (r *summaryRepository) HasTemplateSummary(ctx context.Context, jobID, templateID string) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.Summary{}).
+		Where("transcription_id = ? AND template_id = ?", jobID, templateID).Count(&n).Error
+	return n > 0, err
+}
+
+// SummaryRunFilter selects recordings for a bulk summary run. Only completed
+// jobs with a transcript are ever selected.
+type SummaryRunFilter struct {
+	JobIDs      []string
+	Tag         string
+	MissingOnly bool
+	// HasSummary keeps recordings with at least one summary (retagging).
+	HasSummary bool
+	// SkipEdited drops recordings whose tags were edited by hand.
+	SkipEdited bool
+}
+
+// SummaryRunCandidates returns the IDs of completed, transcribed jobs that
+// match the filter, oldest first.
+func (r *summaryRepository) SummaryRunCandidates(ctx context.Context, f SummaryRunFilter) ([]string, error) {
+	q := r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).
+		Where("status = ? AND transcript IS NOT NULL AND transcript <> ''", models.StatusCompleted)
+	if len(f.JobIDs) > 0 {
+		q = q.Where("id IN ?", f.JobIDs)
+	}
+	if f.MissingOnly {
+		q = q.Where("NOT EXISTS (SELECT 1 FROM summaries s WHERE s.transcription_id = transcription_jobs.id)")
+	}
+	if f.HasSummary {
+		q = q.Where("EXISTS (SELECT 1 FROM summaries s WHERE s.transcription_id = transcription_jobs.id)")
+	}
+	if f.SkipEdited {
+		q = q.Where("tags_edited = ? OR tags_edited IS NULL", false)
+	}
+	var rows []models.TranscriptionJob
+	if err := q.Select("id", "tags").Order("created_at ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(rows))
+	for _, j := range rows {
+		if f.Tag != "" && !containsString(j.Tags, f.Tag) {
+			continue
+		}
+		ids = append(ids, j.ID)
+	}
+	return ids, nil
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// MoveTagsToFlags moves the named tags (sensitive, pii) out of each
+// recording's tags into its flags. Returns how many recordings changed.
+func (r *summaryRepository) MoveTagsToFlags(ctx context.Context, names []string) (int, error) {
+	move := map[string]bool{}
+	for _, n := range names {
+		move[n] = true
+	}
+	var jobs []models.TranscriptionJob
+	if err := r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Select("id", "tags", "flags").
+		Where("tags IS NOT NULL AND tags <> '' AND tags <> 'null'").Find(&jobs).Error; err != nil {
+		return 0, err
+	}
+	changed := 0
+	for _, j := range jobs {
+		var keep models.StringList
+		flags := append(models.StringList{}, j.Flags...)
+		moved := false
+		for _, t := range j.Tags {
+			if !move[t] {
+				keep = append(keep, t)
+				continue
+			}
+			moved = true
+			if !containsString(flags, t) {
+				flags = append(flags, t)
+			}
+		}
+		if !moved {
+			continue
+		}
+		if keep == nil {
+			keep = models.StringList{}
+		}
+		if err := r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", j.ID).
+			Updates(map[string]interface{}{"tags": keep, "flags": flags}).Error; err != nil {
+			return changed, err
+		}
+		changed++
+	}
+	return changed, nil
 }
 
 // ClearSummaryStatuses resets automatic summaries left pending by a restart.

@@ -345,7 +345,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                                 </div>
                                             </div>
                                             {audioFile.status === "completed" && (
-                                                <TagEditor audioId={audioId} tags={audioFile.tags || []} />
+                                                <TagEditor audioId={audioId} tags={audioFile.tags || []} flags={audioFile.flags || []} />
                                             )}
                                             {(audioFile.status === "processing" || audioFile.status === "pending") && typeof pipelineProgress === "number" && (
                                                 <div className="mt-2 max-w-xs">
