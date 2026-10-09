@@ -1000,9 +1000,12 @@ func (suite *APIHandlerTestSuite) TestTaggingSettingsAndLibrary() {
 	var fresh []models.SummaryTemplate
 	assert.NoError(t, db.Find(&fresh).Error)
 	assert.Len(t, fresh, 12)
-	assert.NoError(t, db.First(def, "builtin_key = ?", "default").Error)
-	assert.True(t, def.IsDefault)
-	assert.Equal(t, "llama3", def.Model)
+	// A fresh variable: reusing def would add its old ID to the query
+	var freshDef models.SummaryTemplate
+	assert.NoError(t, db.First(&freshDef, "builtin_key = ?", "default").Error)
+	assert.True(t, freshDef.IsDefault)
+	assert.Equal(t, "llama3", freshDef.Model)
+	def = &freshDef
 
 	// Retag selects summarized recordings and skips hand-edited tags
 	tr := `{"text":"hello"}`
