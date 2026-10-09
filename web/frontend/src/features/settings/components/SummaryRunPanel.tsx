@@ -28,6 +28,7 @@ interface TagCount {
 }
 
 type Scope = "missing" | "tag" | "all";
+type Mode = "summarize" | "retag";
 
 const selectClass =
   "h-9 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] px-2 text-sm text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--brand-solid)]/20";
@@ -37,6 +38,8 @@ const selectClass =
 export function SummaryRunPanel({ disabled = false }: { disabled?: boolean }) {
   const { getAuthHeaders } = useAuth();
   const queryClient = useQueryClient();
+  const [mode, setMode] = useState<Mode>("summarize");
+  const [includeEdited, setIncludeEdited] = useState(false);
   const [scope, setScope] = useState<Scope>("missing");
   const [tag, setTag] = useState("");
   const [templateId, setTemplateId] = useState("");
@@ -71,13 +74,17 @@ export function SummaryRunPanel({ disabled = false }: { disabled?: boolean }) {
   });
 
   const defaultTemplate = templates.find(t => t.is_default);
-  const chosen = templateId ? templates.find(t => t.id === templateId) : defaultTemplate;
+  const chosen = templateId && mode !== "retag" ? templates.find(t => t.id === templateId) : defaultTemplate;
   const usesDefault = !!chosen?.is_default;
 
+  const retag = mode === "retag";
+  const effScope: Scope = retag && scope === "missing" ? "all" : scope;
   const body = (dryRun: boolean) => ({
-    missing_only: scope === "missing",
-    all: scope === "all",
-    tag: scope === "tag" ? tag : "",
+    retag,
+    include_edited: retag && includeEdited,
+    missing_only: effScope === "missing",
+    all: effScope === "all",
+    tag: effScope === "tag" ? tag : "",
     template_id: templateId,
     include_tag_templates: usesDefault && tagTemplates,
     force,
@@ -87,7 +94,7 @@ export function SummaryRunPanel({ disabled = false }: { disabled?: boolean }) {
   // Preview how many recordings match whenever the selection changes
   useEffect(() => {
     setPreview(null);
-    if (disabled || (scope === "tag" && !tag) || !chosen) return;
+    if (disabled || (effScope === "tag" && !tag) || !chosen) return;
     const ctrl = new AbortController();
     fetch("/api/v1/summaries/run", {
       method: "POST",
@@ -100,7 +107,7 @@ export function SummaryRunPanel({ disabled = false }: { disabled?: boolean }) {
       .catch(() => { /* aborted or offline */ });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, tag, templateId, disabled, chosen?.id]);
+  }, [scope, tag, templateId, disabled, chosen?.id, mode, includeEdited]);
 
   const start = async () => {
     setBusy(true);
@@ -113,7 +120,8 @@ export function SummaryRunPanel({ disabled = false }: { disabled?: boolean }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Could not start");
-      setMessage(data.queued ? `Queued ${data.queued} recording${data.queued === 1 ? "" : "s"} with ${data.template}.` : "Nothing to do: no recordings matched.");
+      const what = retag ? "for retagging" : `with ${data.template}`;
+      setMessage(data.queued ? `Queued ${data.queued} recording${data.queued === 1 ? "" : "s"} ${what}.` : "Nothing to do: no recordings matched.");
       queryClient.invalidateQueries({ queryKey: ["summaryRun"] });
       queryClient.invalidateQueries({ queryKey: ["audioFiles"] });
     } catch (e) {
@@ -139,26 +147,33 @@ export function SummaryRunPanel({ disabled = false }: { disabled?: boolean }) {
         <h4 className="text-sm font-medium text-[var(--text-primary)]">Summarize existing recordings</h4>
         <p className="text-xs text-[var(--text-secondary)] mt-1 max-w-xl">
           Runs in the background, one recording at a time. With a local model it shares the GPU with transcription.
-          The default template also refreshes the title, brief and tags.
+          The default template also refreshes the title, brief and tags. Retag only reruns that last step on the
+          existing summary, which takes a few seconds per recording.
         </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <select className={selectClass} value={scope} onChange={e => setScope(e.target.value as Scope)} disabled={disabled} aria-label="Recordings">
-          <option value="missing">Recordings without a summary</option>
+        <select className={selectClass} value={mode} onChange={e => setMode(e.target.value as Mode)} disabled={disabled} aria-label="Action">
+          <option value="summarize">Write summaries</option>
+          <option value="retag">Retag only</option>
+        </select>
+        <select className={selectClass} value={effScope} onChange={e => setScope(e.target.value as Scope)} disabled={disabled} aria-label="Recordings">
+          {!retag && <option value="missing">Recordings without a summary</option>}
           <option value="tag">Recordings with a tag</option>
           <option value="all">All recordings</option>
         </select>
-        {scope === "tag" && (
+        {effScope === "tag" && (
           <select className={selectClass} value={tag} onChange={e => setTag(e.target.value)} disabled={disabled} aria-label="Tag">
             <option value="">Choose a tag</option>
             {tags.map(t => <option key={t.tag} value={t.tag}>{t.tag} ({t.count})</option>)}
           </select>
         )}
-        <select className={selectClass} value={templateId} onChange={e => setTemplateId(e.target.value)} disabled={disabled} aria-label="Template">
-          <option value="">{defaultTemplate ? `Default: ${defaultTemplate.name}` : "Default (none set)"}</option>
-          {templates.filter(t => !t.is_default).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
+        {!retag && (
+          <select className={selectClass} value={templateId} onChange={e => setTemplateId(e.target.value)} disabled={disabled} aria-label="Template">
+            <option value="">{defaultTemplate ? `Default: ${defaultTemplate.name}` : "Default (none set)"}</option>
+            {templates.filter(t => !t.is_default).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-[var(--text-secondary)]">
@@ -168,14 +183,21 @@ export function SummaryRunPanel({ disabled = false }: { disabled?: boolean }) {
             Also run tag-linked templates
           </label>
         )}
-        <label className="flex items-center gap-2">
-          <Switch checked={force} onCheckedChange={setForce} disabled={disabled} />
-          Re-run where this template already has a summary
-        </label>
+        {retag ? (
+          <label className="flex items-center gap-2">
+            <Switch checked={includeEdited} onCheckedChange={setIncludeEdited} disabled={disabled} />
+            Include tags I edited by hand
+          </label>
+        ) : (
+          <label className="flex items-center gap-2">
+            <Switch checked={force} onCheckedChange={setForce} disabled={disabled} />
+            Re-run where this template already has a summary
+          </label>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button size="sm" onClick={start} disabled={disabled || busy || !chosen || (scope === "tag" && !tag) || preview === 0}>
+        <Button size="sm" onClick={start} disabled={disabled || busy || !chosen || (effScope === "tag" && !tag) || preview === 0}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Start
         </Button>
         {status?.running && (

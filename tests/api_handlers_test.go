@@ -897,6 +897,93 @@ func (suite *APIHandlerTestSuite) TestSummaryRunAPI() {
 	assert.Equal(t, models.StringList{"therapy", "counseling"}, updated.AutoTags)
 }
 
+// Test tag vocabulary settings, the template library and retag selection
+func (suite *APIHandlerTestSuite) TestTaggingSettingsAndLibrary() {
+	t := suite.T()
+	db := suite.helper.DB
+	db.Exec("DELETE FROM summary_templates")
+	db.Exec("DELETE FROM summary_settings")
+
+	// Defaults are returned before anything is saved
+	w := suite.makeAuthenticatedRequest("GET", "/api/v1/summaries/settings", nil, false)
+	assert.Equal(t, 200, w.Code)
+	var st api.SummarySettingsResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &st))
+	assert.True(t, st.TagStrict)
+	assert.True(t, st.RedactPII)
+	assert.Equal(t, st.DefaultTagTypes, st.TagTypes)
+	assert.Equal(t, 9, st.TypeCount)
+
+	// Custom topics are saved; types equal to the default stay default
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{
+		"owner_name": " Jason ", "tag_types": st.DefaultTagTypes, "tag_topics": "gardening: plants\n!money: finances",
+	}, false)
+	assert.Equal(t, 200, w.Code)
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &st))
+	assert.Equal(t, "Jason", st.OwnerName)
+	assert.Equal(t, 2, st.TopicCount)
+	var saved models.SummarySetting
+	assert.NoError(t, db.First(&saved).Error)
+	assert.Empty(t, saved.TagTypes, "default list stored as empty")
+
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{"tag_topics": "# nothing"}, false)
+	assert.Equal(t, 400, w.Code, "an empty topic list is rejected")
+
+	// Library: an older template is matched by its old name and updated in place
+	def := &models.SummaryTemplate{Name: "Default", Model: "qwen3:8b", Prompt: "p", IsDefault: true}
+	assert.NoError(t, db.Create(def).Error)
+	old := &models.SummaryTemplate{Name: "Therapy Discussion - Single", Model: "other", Prompt: "old", Reasoning: true}
+	assert.NoError(t, db.Create(old).Error)
+
+	w = suite.makeAuthenticatedRequest("GET", "/api/v1/summaries/library", nil, false)
+	assert.Equal(t, 200, w.Code)
+	var lib []api.LibraryItem
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &lib))
+	status := map[string]string{}
+	for _, it := range lib {
+		status[it.Name] = it.Status
+	}
+	assert.Equal(t, "different", status["Individual Therapy Session"])
+	assert.Equal(t, "missing", status["Medical Appointment Notes"])
+
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/library", map[string]interface{}{
+		"names": []string{"Individual Therapy Session", "Medical Appointment Notes"}}, false)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), `"created":1`)
+	assert.Contains(t, w.Body.String(), `"updated":1`)
+	var upd models.SummaryTemplate
+	assert.NoError(t, db.First(&upd, "id = ?", old.ID).Error)
+	assert.Equal(t, "Individual Therapy Session", upd.Name)
+	assert.Equal(t, models.StringList{"individual therapy"}, upd.AutoTags)
+	assert.Equal(t, "other", upd.Model, "model kept")
+	assert.True(t, upd.Reasoning, "reasoning kept")
+	var med models.SummaryTemplate
+	assert.NoError(t, db.First(&med, "name = ?", "Medical Appointment Notes").Error)
+	assert.Equal(t, "qwen3:8b", med.Model, "new templates use the default template's model")
+
+	// Retag selects summarized recordings and skips hand-edited tags
+	tr := `{"text":"hello"}`
+	a := models.TranscriptionJob{ID: "retag-a", AudioPath: "a.wav", Status: models.StatusCompleted, Transcript: &tr}
+	b := models.TranscriptionJob{ID: "retag-b", AudioPath: "b.wav", Status: models.StatusCompleted, Transcript: &tr, TagsEdited: true}
+	c := models.TranscriptionJob{ID: "retag-c", AudioPath: "c.wav", Status: models.StatusCompleted, Transcript: &tr}
+	for _, j := range []*models.TranscriptionJob{&a, &b, &c} {
+		assert.NoError(t, db.Create(j).Error)
+	}
+	for _, id := range []string{"retag-a", "retag-b"} {
+		assert.NoError(t, db.Create(&models.Summary{TranscriptionID: id, TemplateID: &def.ID, Model: "m", Content: "s"}).Error)
+	}
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/run", map[string]interface{}{"retag": true, "dry_run": true}, false)
+	assert.Equal(t, 200, w.Code)
+	var dry api.SummaryRunResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &dry))
+	assert.Equal(t, []string{"retag-a"}, dry.JobIDs)
+	assert.Equal(t, "Retag", dry.Template)
+
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/run", map[string]interface{}{"retag": true, "include_edited": true, "dry_run": true}, false)
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &dry))
+	assert.ElementsMatch(t, []string{"retag-a", "retag-b"}, dry.JobIDs)
+}
+
 // Test error responses for non-existent resources
 func (suite *APIHandlerTestSuite) TestNotFoundErrors() {
 	endpoints := []string{

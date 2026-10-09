@@ -320,3 +320,15 @@ func sameWord(a, b string) bool {
 	}
 	return false
 }
+
+// YouTube titles a downloaded video "<date> YouTube: <video title>".
+func YouTube(date time.Time, videoTitle string) string {
+	t := strings.Join(strings.Fields(videoTitle), " ")
+	if t == "" || strings.EqualFold(t, "YouTube Audio") {
+		t = "Video"
+	}
+	if len(t) > 120 {
+		t = strings.TrimSpace(t[:120]) + "…"
+	}
+	return date.Format("2006-01-02") + " YouTube: " + t
+}

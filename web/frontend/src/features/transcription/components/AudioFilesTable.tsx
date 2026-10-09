@@ -48,6 +48,7 @@ const JobStatusMonitor = memo(function JobStatusMonitor({ jobId }: { jobId: stri
 import { DebouncedSearchInput } from "@/components/DebouncedSearchInput";
 import { SwipeableItem } from "@/components/ui/swipeable-item";
 import { useSwipeHint } from "@/hooks/use-swipe-hint";
+import { flagTagClass } from "../utils/tagStyle";
 
 
 
@@ -871,7 +872,7 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 																"text-[11px] leading-none px-2 py-1 rounded-full border transition-colors",
 																globalFilter === tag
 																	? "border-[#FF6D20] text-[#FF6D20] bg-orange-50 dark:bg-orange-950"
-																	: "border-[var(--border-subtle)] text-gray-500 hover:border-[#FF6D20] hover:text-[#FF6D20]"
+																	: flagTagClass(tag) || "border-[var(--border-subtle)] text-gray-500 hover:border-[#FF6D20] hover:text-[#FF6D20]"
 															)}
 														>
 															{tag}

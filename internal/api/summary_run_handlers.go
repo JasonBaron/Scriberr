@@ -25,6 +25,12 @@ type SummaryRunRequest struct {
 	Force bool `json:"force"`
 	// DryRun returns the matching recordings without queuing anything.
 	DryRun bool `json:"dry_run"`
+	// Retag reruns only the title, brief and tags step on each recording's
+	// existing summary, with the default template's model. missing_only
+	// does not apply.
+	Retag bool `json:"retag"`
+	// IncludeEdited lets a retag replace tags edited by hand.
+	IncludeEdited bool `json:"include_edited"`
 }
 
 // SummaryRunResponse reports what a run request queued.
@@ -61,6 +67,12 @@ func (h *Handler) StartSummaryRun(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 
+	if req.Retag {
+		req.TemplateID, req.MissingOnly = "", false
+		if len(req.JobIDs) == 0 && req.Tag == "" {
+			req.All = true
+		}
+	}
 	tplID := strings.TrimSpace(req.TemplateID)
 	tplName := ""
 	isDefault := false
@@ -81,10 +93,14 @@ func (h *Handler) StartSummaryRun(c *gin.Context) {
 	}
 
 	ids, err := h.summaryRepo.SummaryRunCandidates(ctx, repository.SummaryRunFilter{
-		JobIDs: req.JobIDs, Tag: req.Tag, MissingOnly: req.MissingOnly})
+		JobIDs: req.JobIDs, Tag: req.Tag, MissingOnly: req.MissingOnly,
+		HasSummary: req.Retag, SkipEdited: req.Retag && !req.IncludeEdited})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to select recordings"})
 		return
+	}
+	if req.Retag {
+		tplName = "Retag"
 	}
 	resp := SummaryRunResponse{Matched: len(ids), JobIDs: ids, Template: tplName, DryRun: req.DryRun}
 	if req.DryRun || len(ids) == 0 {
@@ -92,10 +108,14 @@ func (h *Handler) StartSummaryRun(c *gin.Context) {
 		return
 	}
 	follow := req.IncludeTagTemplates == nil || *req.IncludeTagTemplates
+	reason := "bulk"
+	if req.Retag {
+		reason = "retag"
+	}
 	tasks := make([]summaryTask, 0, len(ids))
 	for _, id := range ids {
 		tasks = append(tasks, summaryTask{JobID: id, TemplateID: tplID, Force: req.Force,
-			FollowTags: follow && isDefault, Reason: "bulk"})
+			FollowTags: follow && isDefault, Retag: req.Retag, IncludeEdited: req.IncludeEdited, Reason: reason})
 	}
 	resp.Queued = h.queueSummaries(tasks...)
 	c.JSON(http.StatusAccepted, resp)

@@ -85,6 +85,13 @@ func TestSaveSuggestions(t *testing.T) {
 	require.Equal(t, "2026-10-08 Hiring plan", *j2.Title, "a placeholder title is replaced")
 	require.Equal(t, models.StringList{"mine"}, j3.Tags, "edited tags are kept")
 	require.Equal(t, models.StringList{"generated"}, j3.SuggestedTags)
+
+	// Retagging with "include hand-edited" replaces them and clears the mark
+	require.NoError(t, repo.SaveSuggestions(ctx, "3", models.JobSuggestion{Title: "x", Tags: models.StringList{"conversation"}, OverwriteEditedTags: true}, false))
+	var j3b models.TranscriptionJob
+	require.NoError(t, db.First(&j3b, "id = ?", "3").Error)
+	require.Equal(t, models.StringList{"conversation"}, j3b.Tags)
+	require.False(t, j3b.TagsEdited)
 }
 
 func TestSetTagsAndTagCounts(t *testing.T) {

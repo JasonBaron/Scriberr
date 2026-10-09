@@ -2,13 +2,19 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"scriberr/internal/gpu"
 	"scriberr/internal/llm"
 	"scriberr/internal/models"
+	"scriberr/internal/pii"
 	"scriberr/internal/titles"
 	"scriberr/pkg/clock"
 	"scriberr/pkg/logger"
@@ -83,10 +89,8 @@ func (h *Handler) UnloadLocalLLM(ctx context.Context) string {
 
 // afterSummary runs in the background once a summary stream has closed,
 // while the model is still loaded and the GPU lock is held. It asks the same
-// model for a working title, a one-sentence brief and tags. Tags are steered
-// toward ones already in use. The title is applied when the current one is a
-// placeholder (a file name, "New Recording", empty); the tags are applied
-// unless the user has edited them.
+// model for a working title, a one-sentence brief and tags (see
+// suggestFromSummary).
 func (h *Handler) afterSummary(ctx context.Context, req SummarizeRequest, svc llm.Service, summary string, completed bool) {
 	if !envEnabled(titles.EnvSuggest) {
 		return
@@ -95,41 +99,130 @@ func (h *Handler) afterSummary(ctx context.Context, req SummarizeRequest, svc ll
 		logger.Info("Title suggestion skipped: summary did not complete", "job_id", req.TranscriptionID)
 		return
 	}
-	job, err := h.jobRepo.FindByID(ctx, req.TranscriptionID)
+	if err := h.suggestFromSummary(ctx, req.TranscriptionID, req.Model, svc, summary, false); err != nil {
+		logger.Warn("Title suggestion failed", "job_id", req.TranscriptionID, "model", req.Model, "error", err)
+	}
+}
+
+// suggestFromSummary asks the model for a topic, brief and tags based on a
+// summary and saves them. With a strict vocabulary (the default) the model
+// picks one recording type and up to three topics from the fixed lists and
+// code adds youtube, sensitive and pii. Otherwise tags are free-form,
+// steered toward ones already in use. The title is applied when the current
+// one is a placeholder; tags are applied unless the user edited them, or
+// always when overwriteEdited is set.
+func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, svc llm.Service, summary string, overwriteEdited bool) error {
+	job, err := h.jobRepo.FindByID(ctx, jobID)
 	if err != nil || job == nil {
-		logger.Warn("Title suggestion skipped: job not found", "job_id", req.TranscriptionID, "error", err)
-		return
+		return errors.New("recording not found")
+	}
+	settings := h.summarySettings(ctx)
+	current := ""
+	if job.Title != nil {
+		current = *job.Title
+	}
+	name := current
+	if name == "" {
+		name = filepath.Base(job.AudioPath)
+	}
+	flags := titles.Flags{YouTube: isYouTube(job)}
+	if job.Transcript != nil {
+		if kinds := pii.Detect(transcriptText(*job.Transcript)); len(kinds) > 0 {
+			flags.PII = true
+			logger.Info("Personal identifiers found in transcript", "job_id", job.ID, "kinds", strings.Join(kinds, ","))
+		}
 	}
 
-	vocabulary := h.tagVocabulary(ctx)
+	strict := settings.TagStrict == nil || *settings.TagStrict
+	voc := titles.NewVocabulary(settings.TagTypes, settings.TagTopics, settings.TagSynonyms)
+	var vocabulary []string
+	prompt := ""
+	if strict {
+		prompt = voc.StrictPrompt(summary, name)
+	} else {
+		vocabulary = h.tagVocabulary(ctx)
+		prompt = titles.Prompt(summary, vocabulary)
+	}
 
 	// Short, deterministic call. Thinking is off regardless of the template:
 	// a title does not benefit from it and it would only add latency.
 	tctx, cancel := context.WithTimeout(llm.WithThinking(context.Background(), false), 90*time.Second)
 	defer cancel()
-	resp, err := svc.ChatCompletion(tctx, req.Model, []llm.ChatMessage{{Role: "user", Content: titles.Prompt(summary, vocabulary)}}, 0.2)
+	resp, err := svc.ChatCompletion(tctx, model, []llm.ChatMessage{{Role: "user", Content: prompt}}, 0.2)
 	if err != nil || resp == nil || len(resp.Choices) == 0 {
-		logger.Warn("Title suggestion failed", "job_id", job.ID, "model", req.Model, "error", err)
-		return
+		if err == nil {
+			err = errors.New("empty reply")
+		}
+		return err
 	}
-	sug, err := titles.Parse(resp.Choices[0].Message.Content, vocabulary)
-	if err != nil {
-		logger.Warn("Title suggestion unusable", "job_id", job.ID, "model", req.Model, "error", err)
-		return
+	raw := resp.Choices[0].Message.Content
+	var topic, brief string
+	var tags []string
+	if strict {
+		c, err := voc.ParseStrict(raw)
+		if err != nil {
+			return fmt.Errorf("unusable reply: %w", err)
+		}
+		topic, brief, tags = c.Topic, c.Brief, voc.Tags(c, flags)
+	} else {
+		sug, err := titles.Parse(raw, vocabulary)
+		if err != nil {
+			return fmt.Errorf("unusable reply: %w", err)
+		}
+		topic, brief, tags = sug.Topic, sug.Brief, titles.WithFlags(sug.Tags, flags)
+	}
+	if settings.RedactPII == nil || *settings.RedactPII {
+		brief = pii.Redact(brief)
 	}
 
 	h.ensureRecordedAt(ctx, job)
-	title := titles.Format(titles.Pattern(), jobDate(job).In(clock.Display), sug.Topic)
-	current := ""
-	if job.Title != nil {
-		current = *job.Title
-	}
+	title := titles.Format(titles.Pattern(), jobDate(job).In(clock.Display), topic)
 	apply := titles.IsPlaceholder(current, job.AudioPath)
-	if err := h.summaryRepo.SaveSuggestions(ctx, job.ID, models.JobSuggestion{Title: title, Brief: sug.Brief, Tags: models.StringList(sug.Tags)}, apply); err != nil {
-		logger.Warn("Could not save title suggestion", "job_id", job.ID, "error", err)
-		return
+	sug := models.JobSuggestion{Title: title, Brief: brief, Tags: models.StringList(tags), OverwriteEditedTags: overwriteEdited}
+	if err := h.summaryRepo.SaveSuggestions(ctx, job.ID, sug, apply); err != nil {
+		return err
 	}
-	logger.Info("Saved title suggestion", "job_id", job.ID, "title", title, "tags", strings.Join(sug.Tags, ","), "applied", apply)
+	logger.Info("Saved title suggestion", "job_id", job.ID, "title", title, "tags", strings.Join(tags, ","), "applied", apply)
+	return nil
+}
+
+// summarySettings returns the saved settings, or defaults.
+func (h *Handler) summarySettings(ctx context.Context) *models.SummarySetting {
+	if s, err := h.summaryRepo.GetSettings(ctx); err == nil && s != nil {
+		return s
+	}
+	return &models.SummarySetting{}
+}
+
+var youTubeTitleRe = regexp.MustCompile(`(?i)\byoutube:`)
+
+// isYouTube reports whether a recording came from YouTube: downloaded
+// through Scriberr, or titled "... YouTube: ..." by hand.
+func isYouTube(job *models.TranscriptionJob) bool {
+	if job.SourceURL != nil && isYouTubeURL(*job.SourceURL) {
+		return true
+	}
+	return job.Title != nil && youTubeTitleRe.MatchString(*job.Title)
+}
+
+func isYouTubeURL(u string) bool {
+	return strings.Contains(u, "youtube.com") || strings.Contains(u, "youtu.be")
+}
+
+// transcriptText returns the plain text of a stored transcript.
+func transcriptText(transcriptJSON string) string {
+	var t storedTranscript
+	if err := json.Unmarshal([]byte(transcriptJSON), &t); err != nil {
+		return ""
+	}
+	if strings.TrimSpace(t.Text) != "" {
+		return t.Text
+	}
+	parts := make([]string, 0, len(t.Segments))
+	for _, s := range t.Segments {
+		parts = append(parts, s.Text)
+	}
+	return strings.Join(parts, " ")
 }
 
 // tagVocabulary returns the tags in use, most used first.

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { normalizeTag, useTagCounts, useUpdateTags } from "@/features/transcription/hooks/useTags";
+import { flagTagClass } from "@/features/transcription/utils/tagStyle";
 
 interface TagEditorProps {
     audioId: string;
@@ -70,7 +71,7 @@ export function TagEditor({ audioId, tags }: TagEditorProps) {
                     <button type="button" onClick={startEdit} className="text-xs text-[var(--text-tertiary)] hover:text-[var(--brand-solid)]">
                         Add tags
                     </button>
-                ) : tags.map(t => <span key={t} className={chip}>{t}</span>)}
+                ) : tags.map(t => <span key={t} className={cn(chip, flagTagClass(t))}>{t}</span>)}
             </div>
         );
     }

@@ -745,6 +745,10 @@ func (r *summaryRepository) SaveSuggestions(ctx context.Context, jobID string, s
 		if err := tx.Model(&models.TranscriptionJob{}).Where("id = ?", jobID).Updates(updates).Error; err != nil {
 			return err
 		}
+		if s.OverwriteEditedTags {
+			return tx.Model(&models.TranscriptionJob{}).Where("id = ?", jobID).
+				Updates(map[string]interface{}{"tags": s.Tags, "tags_edited": false}).Error
+		}
 		return tx.Model(&models.TranscriptionJob{}).
 			Where("id = ? AND (tags_edited = ? OR tags_edited IS NULL)", jobID, false).
 			Update("tags", s.Tags).Error
@@ -783,9 +787,13 @@ func (r *summaryRepository) HasTemplateSummary(ctx context.Context, jobID, templ
 // SummaryRunFilter selects recordings for a bulk summary run. Only completed
 // jobs with a transcript are ever selected.
 type SummaryRunFilter struct {
-	JobIDs      []string // explicit list (other filters still apply)
-	Tag         string   // has this tag
-	MissingOnly bool     // has no summary at all
+	JobIDs      []string
+	Tag         string
+	MissingOnly bool
+	// HasSummary keeps recordings with at least one summary (retagging).
+	HasSummary bool
+	// SkipEdited drops recordings whose tags were edited by hand.
+	SkipEdited bool
 }
 
 // SummaryRunCandidates returns the IDs of completed, transcribed jobs that
@@ -798,6 +806,12 @@ func (r *summaryRepository) SummaryRunCandidates(ctx context.Context, f SummaryR
 	}
 	if f.MissingOnly {
 		q = q.Where("NOT EXISTS (SELECT 1 FROM summaries s WHERE s.transcription_id = transcription_jobs.id)")
+	}
+	if f.HasSummary {
+		q = q.Where("EXISTS (SELECT 1 FROM summaries s WHERE s.transcription_id = transcription_jobs.id)")
+	}
+	if f.SkipEdited {
+		q = q.Where("tags_edited = ? OR tags_edited IS NULL", false)
 	}
 	var rows []models.TranscriptionJob
 	if err := q.Select("id", "tags").Order("created_at ASC").Find(&rows).Error; err != nil {

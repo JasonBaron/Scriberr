@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -39,18 +40,70 @@ func applyTemplateFlags(item *models.SummaryTemplate, req SummaryTemplateRequest
 }
 
 // SummarySettingsRequest updates the fields that are set and keeps the rest.
+// Tag lists use one "[!]tag: description" per line (! marks it sensitive);
+// synonyms use "old, other old = tag". An empty list restores the default.
 type SummarySettingsRequest struct {
 	DefaultModel  *string `json:"default_model"`
 	AutoSummarize *bool   `json:"auto_summarize"`
+	OwnerName     *string `json:"owner_name"`
+	RedactPII     *bool   `json:"redact_pii"`
+	TagStrict     *bool   `json:"tag_strict"`
+	TagTypes      *string `json:"tag_types"`
+	TagTopics     *string `json:"tag_topics"`
+	TagSynonyms   *string `json:"tag_synonyms"`
 }
 
 type SummarySettingsResponse struct {
 	DefaultModel  string `json:"default_model"`
 	AutoSummarize bool   `json:"auto_summarize"`
+	OwnerName     string `json:"owner_name"`
+	RedactPII     bool   `json:"redact_pii"`
+	TagStrict     bool   `json:"tag_strict"`
+	// Effective lists: the saved text, or the built-in default.
+	TagTypes    string `json:"tag_types"`
+	TagTopics   string `json:"tag_topics"`
+	TagSynonyms string `json:"tag_synonyms"`
+	// Built-in defaults, for a reset button.
+	DefaultTagTypes    string `json:"default_tag_types"`
+	DefaultTagTopics   string `json:"default_tag_topics"`
+	DefaultTagSynonyms string `json:"default_tag_synonyms"`
+	TypeCount          int    `json:"type_count"`
+	TopicCount         int    `json:"topic_count"`
+}
+
+func orDefault(saved, def string) string {
+	if strings.TrimSpace(saved) == "" {
+		return def
+	}
+	return saved
+}
+
+// storedList saves "" when the text matches the default, so later changes
+// to the built-in list apply.
+func storedList(text, def string) string {
+	if strings.TrimSpace(text) == strings.TrimSpace(def) {
+		return ""
+	}
+	return strings.TrimSpace(text)
 }
 
 func settingsResponse(s *models.SummarySetting) SummarySettingsResponse {
-	return SummarySettingsResponse{DefaultModel: s.DefaultModel, AutoSummarize: s.AutoSummarize}
+	voc := titles.NewVocabulary(s.TagTypes, s.TagTopics, s.TagSynonyms)
+	return SummarySettingsResponse{
+		DefaultModel:       s.DefaultModel,
+		AutoSummarize:      s.AutoSummarize,
+		OwnerName:          s.OwnerName,
+		RedactPII:          s.RedactPII == nil || *s.RedactPII,
+		TagStrict:          s.TagStrict == nil || *s.TagStrict,
+		TagTypes:           orDefault(s.TagTypes, titles.DefaultTypes),
+		TagTopics:          orDefault(s.TagTopics, titles.DefaultTopics),
+		TagSynonyms:        orDefault(s.TagSynonyms, titles.DefaultSynonyms),
+		DefaultTagTypes:    titles.DefaultTypes,
+		DefaultTagTopics:   titles.DefaultTopics,
+		DefaultTagSynonyms: titles.DefaultSynonyms,
+		TypeCount:          len(voc.Types),
+		TopicCount:         len(voc.Topics),
+	}
 }
 
 // ListSummaryTemplates returns all templates
@@ -217,7 +270,7 @@ func (h *Handler) GetSummarySettings(c *gin.Context) {
 	s, err := h.summaryRepo.GetSettings(c.Request.Context())
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusOK, SummarySettingsResponse{DefaultModel: ""})
+			c.JSON(http.StatusOK, settingsResponse(&models.SummarySetting{}))
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch settings"})
@@ -257,6 +310,34 @@ func (h *Handler) SaveSummarySettings(c *gin.Context) {
 	}
 	if req.AutoSummarize != nil {
 		s.AutoSummarize = *req.AutoSummarize
+	}
+	if req.OwnerName != nil {
+		s.OwnerName = strings.TrimSpace(*req.OwnerName)
+	}
+	if req.RedactPII != nil {
+		v := *req.RedactPII
+		s.RedactPII = &v
+	}
+	if req.TagStrict != nil {
+		v := *req.TagStrict
+		s.TagStrict = &v
+	}
+	if req.TagTypes != nil {
+		if len(titles.ParseEntries(orDefault(*req.TagTypes, titles.DefaultTypes))) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Recording types need at least one \"tag: description\" line"})
+			return
+		}
+		s.TagTypes = storedList(*req.TagTypes, titles.DefaultTypes)
+	}
+	if req.TagTopics != nil {
+		if len(titles.ParseEntries(orDefault(*req.TagTopics, titles.DefaultTopics))) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Topics need at least one \"tag: description\" line"})
+			return
+		}
+		s.TagTopics = storedList(*req.TagTopics, titles.DefaultTopics)
+	}
+	if req.TagSynonyms != nil {
+		s.TagSynonyms = storedList(*req.TagSynonyms, titles.DefaultSynonyms)
 	}
 	s.UpdatedAt = time.Now()
 	if err := h.summaryRepo.SaveSettings(c.Request.Context(), s); err != nil {

@@ -22,8 +22,17 @@ type summaryTask struct {
 	// this summary (and the tags it produces) is saved.
 	FollowTags bool `json:"-"`
 	// Force writes a summary even if one from this template exists.
-	Force  bool   `json:"-"`
-	Reason string `json:"reason"`
+	Force bool `json:"-"`
+	// Retag reruns only the title, brief and tags step on the recording's
+	// existing summary; no new summary is written.
+	Retag bool `json:"retag,omitempty"`
+	// IncludeEdited lets a retag replace tags edited by hand.
+	IncludeEdited bool   `json:"-"`
+	Reason        string `json:"reason"`
+}
+
+func (t summaryTask) same(o summaryTask) bool {
+	return t.JobID == o.JobID && t.TemplateID == o.TemplateID && t.Retag == o.Retag
 }
 
 // SummaryRunItem is a finished task, for progress reporting.
@@ -96,11 +105,11 @@ func (r *summaryRunner) enqueue(tasks ...summaryTask) int {
 }
 
 func (r *summaryRunner) has(t summaryTask) bool {
-	if r.current != nil && r.current.JobID == t.JobID && r.current.TemplateID == t.TemplateID {
+	if r.current != nil && r.current.same(t) {
 		return true
 	}
 	for _, q := range r.queue {
-		if q.JobID == t.JobID && q.TemplateID == t.TemplateID {
+		if q.same(t) {
 			return true
 		}
 	}
@@ -224,6 +233,9 @@ func (h *Handler) runSummaryTask(ctx context.Context, t summaryTask) (SummaryRun
 		return item, nil, ""
 	}
 
+	if t.Retag {
+		return h.runRetagTask(ctx, t, item, fail)
+	}
 	tpl, err := h.summaryRepo.FindByID(ctx, t.TemplateID)
 	if err != nil || tpl == nil || tpl.Model == "" {
 		return fail(errors.New("template missing or has no model"))
@@ -253,6 +265,7 @@ func (h *Handler) runSummaryTask(ctx context.Context, t summaryTask) (SummaryRun
 	if err != nil {
 		return fail(err)
 	}
+	content = h.preparePrompt(ctx, content)
 	svc, _, err := h.getLLMService(ctx)
 	if err != nil {
 		return fail(errors.New("no LLM configured"))
@@ -303,6 +316,71 @@ func (h *Handler) runSummaryTask(ctx context.Context, t summaryTask) (SummaryRun
 	}
 	h.SyncRecording(ctx, t.JobID)
 	return item, svc, tpl.Model
+}
+
+// runRetagTask reruns the title, brief and tags step on the summary from
+// the default template (or the newest summary when there is none), using
+// the default template's model. The template is not run again.
+func (h *Handler) runRetagTask(ctx context.Context, t summaryTask, item SummaryRunItem,
+	fail func(error) (SummaryRunItem, llm.Service, string)) (SummaryRunItem, llm.Service, string) {
+	item.Template = "Retag"
+	tpl, err := h.summaryRepo.FindByID(ctx, t.TemplateID)
+	if err != nil || tpl == nil || tpl.Model == "" {
+		return fail(errors.New("default template missing or has no model"))
+	}
+	sums, err := h.summaryRepo.ListSummaries(ctx, t.JobID)
+	if err != nil || len(sums) == 0 {
+		return fail(errSkip)
+	}
+	pick := newestSummary(sums, tpl.ID)
+	svc, _, err := h.getLLMService(ctx)
+	if err != nil {
+		return fail(errors.New("no LLM configured"))
+	}
+	release := func() {}
+	if _, local := svc.(*llm.OllamaService); local {
+		wctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+		r, err := gpu.Acquire(wctx)
+		cancel()
+		if err != nil {
+			return fail(errors.New("GPU stayed busy"))
+		}
+		release = r
+	}
+	defer release()
+	h.setSummaryStatus(t.JobID, models.SummaryRunning)
+	start := time.Now()
+	if err := h.suggestFromSummary(ctx, t.JobID, tpl.Model, svc, pick.Content, t.IncludeEdited); err != nil {
+		return fail(err)
+	}
+	logger.Info("Retagged recording", "job_id", t.JobID, "model", tpl.Model, "duration", time.Since(start).Round(time.Second))
+	if t.FollowTags {
+		h.queueTagTemplates(ctx, t.JobID, t.Reason)
+	}
+	if !h.summaries.queuedFor(t.JobID) {
+		h.setSummaryStatus(t.JobID, "")
+	}
+	h.SyncRecording(ctx, t.JobID)
+	return item, svc, tpl.Model
+}
+
+// newestSummary returns the newest summary from templateID, or the newest
+// of all when that template has none.
+func newestSummary(sums []models.Summary, templateID string) models.Summary {
+	var best, bestTpl *models.Summary
+	for i := range sums {
+		s := &sums[i]
+		if best == nil || s.CreatedAt.After(best.CreatedAt) {
+			best = s
+		}
+		if s.TemplateID != nil && *s.TemplateID == templateID && (bestTpl == nil || s.CreatedAt.After(bestTpl.CreatedAt)) {
+			bestTpl = s
+		}
+	}
+	if bestTpl != nil {
+		return *bestTpl
+	}
+	return *best
 }
 
 // queueTagTemplates queues every non-default template linked to one of the

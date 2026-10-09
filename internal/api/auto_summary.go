@@ -55,6 +55,26 @@ func buildSummaryContent(transcriptJSON string, includeSpeakers bool, names map[
 	return label + "\n" + text + "\n\nInstructions:\n" + prompt, nil
 }
 
+// privacyGuard is added to every summary prompt when PII redaction is on.
+// Saved summaries are also redacted in code (persistSummary), since a
+// small model does not always follow the instruction.
+const privacyGuard = "Privacy: never write out a date of birth, social security or other ID number, account or card number, phone number, email or street address. Write [redacted] instead."
+
+// preparePrompt fills {me} with the owner's name from Summary settings and
+// adds the privacy instruction.
+func (h *Handler) preparePrompt(ctx context.Context, content string) string {
+	s := h.summarySettings(ctx)
+	me := strings.TrimSpace(s.OwnerName)
+	if me == "" {
+		me = "the person who made the recording"
+	}
+	content = strings.ReplaceAll(content, "{me}", me)
+	if s.RedactPII == nil || *s.RedactPII {
+		content += "\n\n" + privacyGuard
+	}
+	return content
+}
+
 // defaultTemplate returns the template marked as default, if any.
 func (h *Handler) defaultTemplate(ctx context.Context) (*models.SummaryTemplate, error) {
 	items, _, err := h.summaryRepo.List(ctx, 0, 1000)

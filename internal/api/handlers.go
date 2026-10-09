@@ -24,8 +24,10 @@ import (
 	"scriberr/internal/repository"
 	"scriberr/internal/service"
 	"scriberr/internal/sse"
+	"scriberr/internal/titles"
 	"scriberr/internal/transcription"
 	"scriberr/internal/transcription/registry"
+	"scriberr/pkg/clock"
 	"scriberr/pkg/logger"
 
 	"github.com/gin-gonic/gin"
@@ -2693,7 +2695,8 @@ func (h *Handler) DownloadFromYouTube(c *gin.Context) {
 	filename := fmt.Sprintf("%s.%%(ext)s", jobID)
 	filePath := filepath.Join(uploadDir, filename)
 
-	// Get video title if not provided
+	// Get video title if not provided. Downloaded videos are titled
+	// "<date> YouTube: <video title>".
 	var title string
 	if req.Title != nil && *req.Title != "" {
 		title = *req.Title
@@ -2711,6 +2714,7 @@ func (h *Handler) DownloadFromYouTube(c *gin.Context) {
 			title = strings.TrimSpace(out.String())
 			logger.Info("YouTube title retrieved", "title", title, "duration", time.Since(titleStart))
 		}
+		title = titles.YouTube(time.Now().In(clock.Display), title)
 	}
 
 	// Download audio using yt-dlp in Python environment
@@ -2769,11 +2773,15 @@ func (h *Handler) DownloadFromYouTube(c *gin.Context) {
 			"duration", time.Since(downloadStart))
 	}
 
-	// Create transcription record
+	// Create transcription record. The youtube tag is kept when tags are
+	// generated after the summary.
+	sourceURL := strings.TrimSpace(req.URL)
 	job := models.TranscriptionJob{
 		ID:        jobID,
 		AudioPath: actualFilePath,
 		Status:    models.StatusUploaded,
+		SourceURL: &sourceURL,
+		Tags:      models.StringList{titles.TagYouTube},
 	}
 
 	// Set title

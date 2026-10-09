@@ -40,8 +40,19 @@ type SummarySetting struct {
 	ID           uint   `json:"id" gorm:"primaryKey"`
 	DefaultModel string `json:"default_model" gorm:"type:varchar(255);not null;default:''"`
 	// AutoSummarize runs the default template on every completed transcription.
-	AutoSummarize bool      `json:"auto_summarize" gorm:"default:false"`
-	UpdatedAt     time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	AutoSummarize bool `json:"auto_summarize" gorm:"default:false"`
+	// OwnerName is how the person who records is labeled in transcripts.
+	// Templates refer to them as {me}.
+	OwnerName string `json:"owner_name" gorm:"type:varchar(255);not null;default:''"`
+	// RedactPII removes dates of birth, ID, account and card numbers, phone
+	// numbers, emails and street addresses from saved summaries.
+	RedactPII *bool `json:"redact_pii" gorm:"default:true"`
+	// Tag vocabulary. Empty text means the built-in default.
+	TagStrict   *bool     `json:"tag_strict" gorm:"default:true"`
+	TagTypes    string    `json:"tag_types" gorm:"type:text"`
+	TagTopics   string    `json:"tag_topics" gorm:"type:text"`
+	TagSynonyms string    `json:"tag_synonyms" gorm:"type:text"`
+	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 // Summary stores a generated summary linked to a transcription
@@ -71,4 +82,7 @@ type JobSuggestion struct {
 	Title string
 	Brief string
 	Tags  StringList
+	// OverwriteEditedTags replaces tags the user edited by hand and clears
+	// the edited mark (retagging with "include hand-edited").
+	OverwriteEditedTags bool
 }

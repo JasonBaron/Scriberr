@@ -19,6 +19,8 @@ import { SummaryTemplatesTable } from "../components/SummaryTemplatesTable";
 import { CLISettingsTab } from "../components/CLISettingsTab";
 import { AutoSummarySetting } from "../components/AutoSummarySetting";
 import { SummaryRunPanel } from "../components/SummaryRunPanel";
+import { TagVocabularySettings } from "../components/TagVocabularySettings";
+import { TemplateLibraryPanel } from "../components/TemplateLibraryPanel";
 import { useAuth } from "@/features/auth/hooks/useAuth";
 
 export function Settings() {
@@ -145,7 +147,9 @@ export function Settings() {
           <TabsContent value="summary" className="space-y-6">
             <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-[var(--radius-card)] p-4 sm:p-6 shadow-sm">
               <AutoSummarySetting disabled={!llmConfigured} />
+              <TagVocabularySettings disabled={!llmConfigured} />
               <SummaryRunPanel disabled={!llmConfigured} />
+              <TemplateLibraryPanel disabled={!llmConfigured} onApplied={() => setSummaryRefresh((n) => n + 1)} />
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4">
                 <div>
                   <h3 className="text-lg font-medium text-[var(--text-primary)]">Summarization Templates</h3>
