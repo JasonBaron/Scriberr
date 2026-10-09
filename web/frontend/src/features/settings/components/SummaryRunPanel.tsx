@@ -46,6 +46,7 @@ export function SummaryRunPanel({ disabled = false }: { disabled?: boolean }) {
   const [tagTemplates, setTagTemplates] = useState(true);
   const [force, setForce] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
+  const [skippedEdited, setSkippedEdited] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -94,6 +95,7 @@ export function SummaryRunPanel({ disabled = false }: { disabled?: boolean }) {
   // Preview how many recordings match whenever the selection changes
   useEffect(() => {
     setPreview(null);
+    setSkippedEdited(0);
     if (disabled || (effScope === "tag" && !tag) || !chosen) return;
     const ctrl = new AbortController();
     fetch("/api/v1/summaries/run", {
@@ -103,7 +105,7 @@ export function SummaryRunPanel({ disabled = false }: { disabled?: boolean }) {
       signal: ctrl.signal,
     })
       .then(r => (r.ok ? r.json() : null))
-      .then(d => d && setPreview(d.matched))
+      .then(d => { if (d) { setPreview(d.matched); setSkippedEdited(d.skipped_edited || 0); } })
       .catch(() => { /* aborted or offline */ });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,6 +209,7 @@ export function SummaryRunPanel({ disabled = false }: { disabled?: boolean }) {
         )}
         <span className="text-xs text-[var(--text-tertiary)]">
           {!chosen ? "Set a default template first." : preview === null ? "" : `${preview} recording${preview === 1 ? "" : "s"} match.`}
+          {retag && skippedEdited > 0 && ` ${skippedEdited} with hand-edited tags skipped; turn on "Include tags I edited by hand" to include them.`}
         </span>
       </div>
       {message && <p className="text-xs text-[var(--text-secondary)]">{message}</p>}

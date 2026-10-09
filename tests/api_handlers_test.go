@@ -1033,6 +1033,7 @@ func (suite *APIHandlerTestSuite) TestTaggingSettingsAndLibrary() {
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &dry))
 	assert.Equal(t, []string{"retag-a"}, dry.JobIDs)
 	assert.Equal(t, "Retag", dry.Template)
+	assert.Equal(t, 1, dry.SkippedEdited, "the hand-edited recording is reported")
 
 	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/run", map[string]interface{}{"retag": true, "include_edited": true, "dry_run": true}, false)
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &dry))

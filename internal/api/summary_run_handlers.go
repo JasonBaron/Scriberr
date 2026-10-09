@@ -40,6 +40,9 @@ type SummaryRunResponse struct {
 	JobIDs   []string `json:"job_ids"`
 	Template string   `json:"template"`
 	DryRun   bool     `json:"dry_run,omitempty"`
+	// SkippedEdited counts recordings a retag left out because their tags
+	// were edited by hand (set include_edited to include them).
+	SkippedEdited int `json:"skipped_edited,omitempty"`
 }
 
 // StartSummaryRun queues summaries for existing recordings
@@ -104,6 +107,12 @@ func (h *Handler) StartSummaryRun(c *gin.Context) {
 		tplName = "Retag"
 	}
 	resp := SummaryRunResponse{Matched: len(ids), JobIDs: ids, Template: tplName, DryRun: req.DryRun}
+	if req.Retag && !req.IncludeEdited {
+		if all, err := h.summaryRepo.SummaryRunCandidates(ctx, repository.SummaryRunFilter{
+			JobIDs: req.JobIDs, Tag: req.Tag, HasSummary: true}); err == nil {
+			resp.SkippedEdited = len(all) - len(ids)
+		}
+	}
 	if req.DryRun || len(ids) == 0 {
 		c.JSON(http.StatusOK, resp)
 		return

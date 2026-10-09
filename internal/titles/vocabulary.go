@@ -203,18 +203,19 @@ func (v Vocabulary) sensitive(tag string) bool {
 	return false
 }
 
-// StrictPrompt asks for a topic, brief, one type, topics and a PII flag.
+// StrictPrompt asks for a topic, brief, one type and topics. PII is not
+// asked for: the model flagged it from summary wording alone and was wrong
+// far more often than right, so it comes from the transcript check only.
 // name is the recording's current title or file name, a useful hint.
 func (v Vocabulary) StrictPrompt(summary, name string) string {
 	var b strings.Builder
 	b.WriteString(`Read this summary of a recording and return JSON only, no other text:
-{"topic": "...", "brief": "...", "type": "...", "topics": ["..."], "pii": false}
+{"topic": "...", "brief": "...", "type": "...", "topics": ["..."]}
 
 topic: 4 to 8 words naming what the recording is specifically about. Title Case. No date, no quotes, no trailing punctuation. Avoid generic words like Recording, Conversation, Discussion, Meeting, Summary.
 brief: one plain sentence of at most 25 words saying what the recording covers, for a list view. Never include a date of birth, ID or account number, phone number, email or address.
 type: exactly one recording type from the list below, spelled exactly as shown. Decide by who is talking and the setting, not by the subject.
 topics: 1 to 3 topics from the list below, spelled exactly as shown, most important first. Only main subjects, not passing mentions. Never invent a topic.
-pii: true if the summary says personal identifiers were stated, such as a date of birth, social security or ID number, account or card number, home address, phone number or email. Names alone are not PII.
 
 Recording types:
 `)
@@ -304,7 +305,8 @@ type Flags struct {
 
 // Tags assembles the final tags: type, topics, then youtube, sensitive
 // and pii. YouTube recordings are always the media type. A recording is
-// sensitive when its type or a topic is marked sensitive, or it has PII.
+// sensitive when its type or a topic is marked sensitive, or when the
+// transcript check found identifiers (pii).
 func (v Vocabulary) Tags(c Classified, f Flags) []string {
 	var out []string
 	typ := c.Type
@@ -325,7 +327,9 @@ func (v Vocabulary) Tags(c Classified, f Flags) []string {
 	if f.YouTube {
 		out = append(out, TagYouTube)
 	}
-	pii := c.PII || f.PII
+	// PII comes from the transcript check only; c.PII (the model's opinion)
+	// is parsed for older replies but ignored.
+	pii := f.PII
 	if sensitive || pii {
 		out = append(out, TagSensitive)
 	}

@@ -57,6 +57,10 @@ func TestVocabularyTags(t *testing.T) {
 	if !reflect.DeepEqual(got, []string{"media", "personal growth", "youtube", "sensitive", "pii"}) {
 		t.Errorf("youtube pii: %v", got)
 	}
+	got = v.Tags(Classified{Type: "conversation", Topics: []string{"family"}, PII: true}, Flags{})
+	if !reflect.DeepEqual(got, []string{"conversation", "family"}) {
+		t.Errorf("model PII is ignored: %v", got)
+	}
 	got = v.Tags(Classified{Type: "couples therapy", Topics: []string{"relationships"}}, Flags{})
 	if !reflect.DeepEqual(got, []string{"couples therapy", "relationships", "sensitive"}) {
 		t.Errorf("sensitive type: %v", got)
