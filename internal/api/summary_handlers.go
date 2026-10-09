@@ -21,6 +21,7 @@ type SummaryTemplateRequest struct {
 	Reasoning          *bool    `json:"reasoning"`
 	IsDefault          *bool    `json:"is_default"`
 	AutoTags           []string `json:"auto_tags"`
+	Enabled            *bool    `json:"enabled"`
 }
 
 // applyTemplateFlags copies the optional flags from a request onto a template.
@@ -36,6 +37,14 @@ func applyTemplateFlags(item *models.SummaryTemplate, req SummaryTemplateRequest
 	}
 	if req.AutoTags != nil {
 		item.AutoTags = models.StringList(titles.CleanUserTags(req.AutoTags))
+	}
+	if req.Enabled != nil {
+		v := *req.Enabled
+		item.Enabled = &v
+	}
+	if item.IsDefault {
+		on := true
+		item.Enabled = &on // the default template is always enabled
 	}
 }
 
@@ -117,12 +126,21 @@ func settingsResponse(s *models.SummarySetting) SummarySettingsResponse {
 // @Security BearerAuth
 // @Router /api/v1/summaries [get]
 func (h *Handler) ListSummaryTemplates(c *gin.Context) {
-	// TODO: Add pagination support
-	items, _, err := h.summaryRepo.List(c.Request.Context(), 0, 1000)
+	ctx := c.Request.Context()
+	items, _, err := h.summaryRepo.List(ctx, 0, 1000)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch templates"})
 		return
 	}
+	// Templates added before an LLM was set up get a model now.
+	if h.fillTemplateModels(ctx, items) {
+		if items, _, err = h.summaryRepo.List(ctx, 0, 1000); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch templates"})
+			return
+		}
+	}
+	sortTemplates(items)
+	annotateTemplates(items)
 	c.JSON(http.StatusOK, items)
 }
 
@@ -235,6 +253,7 @@ func (h *Handler) UpdateSummaryTemplate(c *gin.Context) {
 			return
 		}
 	}
+	h.ensureDefaultTemplate(c.Request.Context())
 	c.JSON(http.StatusOK, item)
 }
 
@@ -250,6 +269,10 @@ func (h *Handler) UpdateSummaryTemplate(c *gin.Context) {
 // @Router /api/v1/summaries/{id} [delete]
 func (h *Handler) DeleteSummaryTemplate(c *gin.Context) {
 	id := c.Param("id")
+	if t, err := h.summaryRepo.FindByID(c.Request.Context(), id); err == nil && t != nil && t.BuiltinKey != "" {
+		c.JSON(http.StatusConflict, gin.H{"error": "Built-in templates cannot be deleted. Disable it instead, or reset it to the shipped version."})
+		return
+	}
 	if err := h.summaryRepo.Delete(c.Request.Context(), id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete template"})
 		return

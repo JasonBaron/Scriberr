@@ -13,8 +13,12 @@ import (
 // or the template would never run automatically.
 func TestTemplateLibraryAutoTagsInVocabulary(t *testing.T) {
 	v := titles.NewVocabulary("", "", "")
-	names := map[string]bool{}
+	names, keys := map[string]bool{}, map[string]bool{}
 	for _, lib := range templateLibrary {
+		if lib.Key == "" || keys[lib.Key] {
+			t.Errorf("%s: missing or duplicate key %q", lib.Name, lib.Key)
+		}
+		keys[lib.Key] = true
 		if names[lib.Name] {
 			t.Errorf("duplicate library name %q", lib.Name)
 		}
@@ -56,8 +60,11 @@ func TestLibraryModel(t *testing.T) {
 		t.Errorf("settings model: %q", m)
 	}
 	items[3].Model = "mistral"
-	if m, _ := libraryModel(items, "gemma"); m != "mistral" {
+	if m, _ := libraryModel(items, ""); m != "mistral" {
 		t.Errorf("default template model: %q", m)
+	}
+	if m, _ := libraryModel(items, "gemma"); m != "gemma" {
+		t.Errorf("settings model wins: %q", m)
 	}
 	if m, def := libraryModel(nil, ""); m != "" || def {
 		t.Errorf("empty: %q %v", m, def)

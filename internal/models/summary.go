@@ -23,10 +23,22 @@ type SummaryTemplate struct {
 	IsDefault bool `json:"is_default" gorm:"default:false"`
 	// AutoTags runs this template automatically on recordings that have any
 	// of these tags (after the default summary has tagged them).
-	AutoTags  StringList `json:"auto_tags,omitempty" gorm:"type:text"`
-	CreatedAt time.Time  `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+	AutoTags StringList `json:"auto_tags,omitempty" gorm:"type:text"`
+	// Enabled templates run automatically and appear in the Summarize
+	// dialog. Disabled ones are kept but never run on their own.
+	Enabled *bool `json:"enabled" gorm:"default:true"`
+	// BuiltinKey links a template to one shipped with Scriberr, so it can
+	// be reset to the shipped version. Empty for templates made by hand.
+	BuiltinKey string `json:"builtin_key,omitempty" gorm:"type:varchar(64);index"`
+	// Customized reports that a built-in template differs from the shipped
+	// version. Computed, not stored.
+	Customized bool      `json:"customized" gorm:"-"`
+	CreatedAt  time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt  time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
+
+// IsEnabled treats a missing value as enabled.
+func (st *SummaryTemplate) IsEnabled() bool { return st.Enabled == nil || *st.Enabled }
 
 func (st *SummaryTemplate) BeforeCreate(tx *gorm.DB) error {
 	if st.ID == "" {

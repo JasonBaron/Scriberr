@@ -21,7 +21,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { SummaryMarkdown } from "./SummaryMarkdown";
 import { downloadText, summaryFilename } from "./summaryFiles";
 import { useSummaryTemplates, useSummarizer, useExistingSummary, pickInitialTemplate } from "@/features/transcription/hooks/useTranscriptionSummary";
@@ -59,7 +59,9 @@ interface SummaryDialogProps {
 
 export function SummaryDialog({ audioId, isOpen, onClose, llmReady, startNew = false }: SummaryDialogProps) {
     const { toast } = useToast();
-    const { data: templates = [], isLoading: templatesLoading } = useSummaryTemplates();
+    const { data: allTemplates, isLoading: templatesLoading } = useSummaryTemplates();
+    // Disabled templates are hidden here; they stay editable in Settings.
+    const templates = useMemo(() => (allTemplates ?? []).filter(t => t.enabled !== false), [allTemplates]);
     const { data: existingSummary, isLoading: summaryLoading } = useExistingSummary(audioId);
     const { data: transcript } = useTranscript(audioId, true);
     const { data: audioFile } = useAudioDetail(audioId);

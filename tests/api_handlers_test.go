@@ -929,52 +929,82 @@ func (suite *APIHandlerTestSuite) TestTaggingSettingsAndLibrary() {
 	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{"tag_topics": "# nothing"}, false)
 	assert.Equal(t, 400, w.Code, "an empty topic list is rejected")
 
-	// Library: an older template is matched by its old name and updated in place
-	def := &models.SummaryTemplate{Name: "Default", Model: "qwen3:8b", Prompt: "p", IsDefault: true}
+	// Built-in templates are added on startup. Older templates with the same
+	// or a former name are linked, keeping their content and model.
+	ctx := context.Background()
+	def := &models.SummaryTemplate{Name: "Default", Model: "qwen3:8b", Prompt: "p"}
 	assert.NoError(t, db.Create(def).Error)
+	assert.NoError(t, db.Create(&models.SummaryTemplate{Name: "My Notes", Model: "qwen3:8b", Prompt: "mine"}).Error)
 	old := &models.SummaryTemplate{Name: "Therapy Discussion - Single", Model: "other", Prompt: "old", Reasoning: true}
 	assert.NoError(t, db.Create(old).Error)
 
-	w = suite.makeAuthenticatedRequest("GET", "/api/v1/summaries/library", nil, false)
+	suite.handler.SeedTemplates(ctx)
+	suite.handler.SeedTemplates(ctx) // idempotent
+	var all []models.SummaryTemplate
+	assert.NoError(t, db.Find(&all).Error)
+	assert.Len(t, all, 13, "12 built-in (2 linked) plus one custom")
+
+	var linked models.SummaryTemplate
+	assert.NoError(t, db.First(&linked, "id = ?", old.ID).Error)
+	assert.Equal(t, "individual-therapy", linked.BuiltinKey)
+	assert.Equal(t, "old", linked.Prompt, "linking keeps the content")
+	assert.NoError(t, db.First(def, "id = ?", def.ID).Error)
+	assert.True(t, def.IsDefault, "the built-in Default becomes the default when none is marked")
+	var media models.SummaryTemplate
+	assert.NoError(t, db.First(&media, "builtin_key = ?", "media-notes").Error)
+	assert.Equal(t, "qwen3:8b", media.Model, "new templates use the model in use")
+	assert.True(t, media.IsEnabled())
+
+	w = suite.makeAuthenticatedRequest("GET", "/api/v1/summaries/", nil, false)
 	assert.Equal(t, 200, w.Code)
-	var lib []api.LibraryItem
-	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &lib))
-	status := map[string]string{}
-	for _, it := range lib {
-		status[it.Name] = it.Status
+	var listed []models.SummaryTemplate
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &listed))
+	assert.Equal(t, def.ID, listed[0].ID, "default first")
+	byKey := map[string]models.SummaryTemplate{}
+	for _, it := range listed {
+		byKey[it.BuiltinKey] = it
 	}
-	assert.Equal(t, "different", status["Individual Therapy Session"])
-	assert.Equal(t, "missing", status["Medical Appointment Notes"])
+	assert.True(t, byKey["individual-therapy"].Customized)
+	assert.False(t, byKey["media-notes"].Customized)
 
-	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/library", map[string]interface{}{
-		"names": []string{"Individual Therapy Session", "Medical Appointment Notes"}}, false)
+	// Reset restores the shipped content and keeps model and reasoning
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/"+old.ID+"/reset", nil, false)
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), `"created":1`)
-	assert.Contains(t, w.Body.String(), `"updated":1`)
-	var upd models.SummaryTemplate
-	assert.NoError(t, db.First(&upd, "id = ?", old.ID).Error)
-	assert.Equal(t, "Individual Therapy Session", upd.Name)
-	assert.Equal(t, models.StringList{"individual therapy"}, upd.AutoTags)
-	assert.Equal(t, "other", upd.Model, "model kept")
-	assert.True(t, upd.Reasoning, "reasoning kept")
-	var med models.SummaryTemplate
-	assert.NoError(t, db.First(&med, "name = ?", "Medical Appointment Notes").Error)
-	assert.Equal(t, "qwen3:8b", med.Model, "new templates use the default template's model")
+	assert.NoError(t, db.First(&linked, "id = ?", old.ID).Error)
+	assert.Equal(t, "Individual Therapy Session", linked.Name)
+	assert.Equal(t, models.StringList{"individual therapy"}, linked.AutoTags)
+	assert.Equal(t, "other", linked.Model)
+	assert.True(t, linked.Reasoning)
 
-	// With no templates at all, new templates need a model from the request
+	// Enable and disable; the default stays enabled
+	w = suite.makeAuthenticatedRequest("PUT", "/api/v1/summaries/"+media.ID+"/enabled", map[string]interface{}{"enabled": false}, false)
+	assert.Equal(t, 200, w.Code)
+	assert.NoError(t, db.First(&media, "id = ?", media.ID).Error)
+	assert.False(t, media.IsEnabled())
+	w = suite.makeAuthenticatedRequest("PUT", "/api/v1/summaries/"+def.ID+"/enabled", map[string]interface{}{"enabled": false}, false)
+	assert.Equal(t, 400, w.Code)
+
+	// Built-ins cannot be deleted; custom templates can
+	w = suite.makeAuthenticatedRequest("DELETE", "/api/v1/summaries/"+media.ID, nil, false)
+	assert.Equal(t, 409, w.Code)
+	var mine models.SummaryTemplate
+	assert.NoError(t, db.First(&mine, "name = ?", "My Notes").Error)
+	w = suite.makeAuthenticatedRequest("DELETE", "/api/v1/summaries/"+mine.ID, nil, false)
+	assert.Equal(t, 204, w.Code)
+
+	// From nothing: templates are added with the settings model
 	db.Exec("DELETE FROM summary_templates")
-	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/library", map[string]interface{}{"names": []string{"Default"}}, false)
-	assert.Equal(t, 400, w.Code, "no model anywhere")
-	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/library", map[string]interface{}{"names": []string{"Default", "Media Notes"}, "model": "llama3"}, false)
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{"default_model": "llama3"}, false)
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), `"created":2`)
-	var newDef models.SummaryTemplate
-	assert.NoError(t, db.First(&newDef, "name = ?", "Default").Error)
-	assert.True(t, newDef.IsDefault, "a new Default becomes the default when there is none")
-	assert.Equal(t, "llama3", newDef.Model)
+	suite.handler.SeedTemplates(ctx)
+	var fresh []models.SummaryTemplate
+	assert.NoError(t, db.Find(&fresh).Error)
+	assert.Len(t, fresh, 12)
+	assert.NoError(t, db.First(def, "builtin_key = ?", "default").Error)
+	assert.True(t, def.IsDefault)
+	assert.Equal(t, "llama3", def.Model)
 
 	// Retag selects summarized recordings and skips hand-edited tags
-	def = &newDef
 	tr := `{"text":"hello"}`
 	a := models.TranscriptionJob{ID: "retag-a", AudioPath: "a.wav", Status: models.StatusCompleted, Transcript: &tr}
 	b := models.TranscriptionJob{ID: "retag-b", AudioPath: "b.wav", Status: models.StatusCompleted, Transcript: &tr, TagsEdited: true}

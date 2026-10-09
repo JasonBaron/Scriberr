@@ -1,18 +1,24 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"scriberr/internal/models"
+	"scriberr/pkg/logger"
 )
 
-// libraryTemplate is a recommended summary template shipped with the fork.
-// Auto tags use the recording types and topics of the default tag
+// libraryTemplate is a summary template shipped with the fork. They are
+// added on startup (see SeedTemplates) and can be edited, disabled and
+// reset. Auto tags use the recording types and topics of the default tag
 // vocabulary, so each one runs on the right recordings automatically.
 type libraryTemplate struct {
+	Key         string   `json:"key"`
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Prompt      string   `json:"prompt"`
@@ -37,6 +43,7 @@ const libraryRules = `Rules:
 
 var templateLibrary = []libraryTemplate{
 	{
+		Key:         "default",
 		Name:        "Default",
 		Description: "Short general summary of any recording. Also used to suggest the title, brief and tags.",
 		Speakers:    true,
@@ -64,6 +71,7 @@ Up to 3 short direct quotes that capture something important, with the speaker.
 Keep the whole summary under 350 words.`,
 	},
 	{
+		Key:         "individual-therapy",
 		Name:        "Individual Therapy Session",
 		Description: "Reflection notes from an individual therapy session.",
 		AutoTags:    []string{"individual therapy"},
@@ -99,6 +107,7 @@ Bullets of anything agreed to try before the next session.
 Tone: direct, grounded and honest. Do not flatter, catastrophize or turn this into a motivational speech. Under 600 words.`,
 	},
 	{
+		Key:         "couples-therapy",
 		Name:        "Couples Therapy Session",
 		Description: "Patterns, rupture, repair and shared work from a couples therapy session.",
 		AutoTags:    []string{"couples therapy"},
@@ -135,6 +144,7 @@ Bullets of practical, low-pressure things to try together.
 Tone: neutral, careful and constructive. Under 650 words.`,
 	},
 	{
+		Key:         "relationship-talk",
 		Name:        "Relationship Talk Review",
 		Description: "Needs, escalation, repair and follow-up from a conversation between partners.",
 		AutoTags:    []string{"relationship talk"},
@@ -171,6 +181,7 @@ Bullets of anything agreed, and anything left unresolved.
 Under 600 words.`,
 	},
 	{
+		Key:         "argument-review",
 		Name:        "Argument Review",
 		Description: "Triggers, escalation, ownership and repair after a heated disagreement.",
 		AutoTags:    []string{"conflict"},
@@ -210,6 +221,7 @@ A short message that owns your part without over-apologizing or pressuring for a
 Under 650 words.`,
 	},
 	{
+		Key:         "separation-planning",
 		Name:        "Separation Planning",
 		Description: "Practical decisions and open items when separating: finances, housing, children, agreements.",
 		AutoTags:    []string{"separation"},
@@ -239,6 +251,7 @@ Bullets of points that need professional input.
 Under 500 words.`,
 	},
 	{
+		Key:         "medical-appointment",
 		Name:        "Medical Appointment Notes",
 		Description: "Symptoms, findings, tests, treatment plan and follow-ups from a medical visit.",
 		AutoTags:    []string{"medical appointment"},
@@ -277,6 +290,7 @@ Next appointment or check-in, if set.
 Under 550 words.`,
 	},
 	{
+		Key:         "advisor-meeting",
 		Name:        "Advisor Meeting Notes",
 		Description: "Advice, decisions, documents, costs and deadlines from a lawyer, mediator, accountant or other advisor.",
 		AutoTags:    []string{"advisor meeting"},
@@ -312,6 +326,7 @@ Bullets of what still needs an answer.
 Under 500 words.`,
 	},
 	{
+		Key:         "work-meeting",
 		Name:        "Work Meeting Notes",
 		Description: "Decisions, action items, risks and open questions from a work meeting.",
 		AutoTags:    []string{"work meeting"},
@@ -340,6 +355,7 @@ Bullets of what is unresolved and who should answer.
 Keep it factual and skimmable. Under 450 words.`,
 	},
 	{
+		Key:         "media-notes",
 		Name:        "Media Notes",
 		Description: "Key ideas, takeaways and quotes from a video, podcast, lecture or guided practice.",
 		AutoTags:    []string{"media"},
@@ -366,6 +382,7 @@ Up to 3 short direct quotes.
 Under 450 words.`,
 	},
 	{
+		Key:         "personal-note",
 		Name:        "Personal Note",
 		Description: "Themes, decisions and reminders from a voice memo or journal entry.",
 		AutoTags:    []string{"personal note"},
@@ -391,6 +408,7 @@ Bullets of loose threads worth coming back to.
 Under 350 words.`,
 	},
 	{
+		Key:         "general-summary",
 		Name:        "General Transcript Summary",
 		Description: "Detailed, balanced summary of any transcript, with important details and speaker perspectives.",
 		Speakers:    true,
@@ -429,20 +447,21 @@ Under 700 words.`,
 	},
 }
 
-// LibraryItem is a recommended template and how it compares to what is
-// installed.
-type LibraryItem struct {
-	libraryTemplate
-	// Status is "missing", "installed" (same content) or "different".
-	Status       string `json:"status"`
-	ExistingID   string `json:"existing_id,omitempty"`
-	ExistingName string `json:"existing_name,omitempty"`
+func builtinByKey(key string) *libraryTemplate {
+	for i := range templateLibrary {
+		if templateLibrary[i].Key == key {
+			return &templateLibrary[i]
+		}
+	}
+	return nil
 }
 
+// findLibraryMatch finds an unlinked template with the library template's
+// name or one of its older names.
 func findLibraryMatch(lib libraryTemplate, items []models.SummaryTemplate) *models.SummaryTemplate {
 	for _, name := range append([]string{lib.Name}, lib.Replaces...) {
 		for i := range items {
-			if strings.EqualFold(strings.TrimSpace(items[i].Name), name) {
+			if items[i].BuiltinKey == "" && strings.EqualFold(strings.TrimSpace(items[i].Name), name) {
 				return &items[i]
 			}
 		}
@@ -469,37 +488,28 @@ func sameAsLibrary(lib libraryTemplate, t *models.SummaryTemplate) bool {
 	return true
 }
 
-// ListTemplateLibrary lists the recommended templates
-// @Summary Recommended summary templates
-// @Description Templates shipped with the fork and whether each is installed, missing or different from the installed version
-// @Tags summaries
-// @Produce json
-// @Success 200 {array} LibraryItem
-// @Security ApiKeyAuth
-// @Security BearerAuth
-// @Router /api/v1/summaries/library [get]
-func (h *Handler) ListTemplateLibrary(c *gin.Context) {
-	items, _, err := h.summaryRepo.List(c.Request.Context(), 0, 1000)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list templates"})
-		return
-	}
-	out := make([]LibraryItem, 0, len(templateLibrary))
-	for _, lib := range templateLibrary {
-		it := LibraryItem{libraryTemplate: lib, Status: "missing"}
-		if t := findLibraryMatch(lib, items); t != nil {
-			it.ExistingID, it.ExistingName, it.Status = t.ID, t.Name, "different"
-			if sameAsLibrary(lib, t) {
-				it.Status = "installed"
-			}
-		}
-		out = append(out, it)
-	}
-	c.JSON(http.StatusOK, out)
+// applyLibrary copies the shipped content onto a template. Model,
+// Reasoning, Enabled and Default are left alone.
+func applyLibrary(t *models.SummaryTemplate, lib libraryTemplate) {
+	desc := lib.Description
+	t.Name, t.Description, t.Prompt = lib.Name, &desc, lib.Prompt
+	t.AutoTags = models.StringList(append([]string{}, lib.AutoTags...))
+	t.IncludeSpeakerInfo = lib.Speakers
+	t.BuiltinKey = lib.Key
 }
 
-// libraryModel picks the model for new library templates: the default
-// template's, else the default model in settings, else the model most
+// annotateTemplates marks built-in templates that differ from the shipped
+// version.
+func annotateTemplates(items []models.SummaryTemplate) {
+	for i := range items {
+		if lib := builtinByKey(items[i].BuiltinKey); lib != nil {
+			items[i].Customized = !sameAsLibrary(*lib, &items[i])
+		}
+	}
+}
+
+// libraryModel picks a model for templates that have none: the model set in
+// Summary settings, else the default template's, else the model most
 // templates use. hasDefault reports whether a default template exists.
 func libraryModel(items []models.SummaryTemplate, settingsModel string) (model string, hasDefault bool) {
 	counts := map[string]int{}
@@ -514,11 +524,11 @@ func libraryModel(items []models.SummaryTemplate, settingsModel string) (model s
 			counts[m]++
 		}
 	}
-	if model != "" {
-		return model, hasDefault
-	}
 	if m := strings.TrimSpace(settingsModel); m != "" {
 		return m, hasDefault
+	}
+	if model != "" {
+		return model, hasDefault
 	}
 	best := 0
 	for m, n := range counts {
@@ -529,81 +539,218 @@ func libraryModel(items []models.SummaryTemplate, settingsModel string) (model s
 	return model, hasDefault
 }
 
-// ApplyTemplateLibraryRequest names the library templates to install.
-type ApplyTemplateLibraryRequest struct {
-	Names []string `json:"names" binding:"required,min=1"`
-	// Model for new templates. Empty means the default template's model,
-	// else the settings default model, else the model most templates use.
-	Model string `json:"model"`
+// pickModel returns a model for templates without one, asking the LLM
+// provider for its models when nothing is configured yet. "" when none is
+// available (no provider set up).
+func (h *Handler) pickModel(ctx context.Context, items []models.SummaryTemplate) string {
+	if m, _ := libraryModel(items, h.summarySettings(ctx).DefaultModel); m != "" {
+		return m
+	}
+	svc, _, err := h.getLLMService(ctx)
+	if err != nil {
+		return ""
+	}
+	mctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	names, err := svc.GetModels(mctx)
+	if err != nil || len(names) == 0 {
+		return ""
+	}
+	return names[0]
 }
 
-// ApplyTemplateLibrary installs or updates recommended templates
-// @Summary Install recommended templates
-// @Description Creates missing templates and updates installed ones (matched by name or an older name) in place: name, description, prompt, auto tags and speaker setting. Model, Reasoning and Default are kept. New templates use the default template's model, else the settings default model, else the model most templates use.
+// SeedTemplates adds the shipped templates on startup. A template made
+// earlier with the same (or an older) name is linked rather than
+// duplicated, and its content is kept. Templates without a model get one
+// when a model is available. When no template is the default, the shipped
+// Default becomes it.
+func (h *Handler) SeedTemplates(ctx context.Context) {
+	items, _, err := h.summaryRepo.List(ctx, 0, 1000)
+	if err != nil {
+		logger.Warn("Could not load summary templates", "error", err)
+		return
+	}
+	have := map[string]bool{}
+	for _, t := range items {
+		if t.BuiltinKey != "" {
+			have[t.BuiltinKey] = true
+		}
+	}
+	added, linked := 0, 0
+	for _, lib := range templateLibrary {
+		if have[lib.Key] {
+			continue
+		}
+		if t := findLibraryMatch(lib, items); t != nil {
+			t.BuiltinKey = lib.Key
+			if err := h.summaryRepo.Update(ctx, t); err == nil {
+				linked++
+			}
+			continue
+		}
+		t := models.SummaryTemplate{}
+		applyLibrary(&t, lib)
+		if err := h.summaryRepo.Create(ctx, &t); err != nil {
+			logger.Warn("Could not add built-in template", "name", lib.Name, "error", err)
+			continue
+		}
+		items = append(items, t)
+		added++
+	}
+	h.fillTemplateModels(ctx, items)
+	h.ensureDefaultTemplate(ctx)
+	if added+linked > 0 {
+		logger.Info("Built-in summary templates ready", "added", added, "linked", linked)
+	}
+}
+
+// fillTemplateModels gives templates without a model the one pickModel
+// chooses. Returns true when any template changed.
+func (h *Handler) fillTemplateModels(ctx context.Context, items []models.SummaryTemplate) bool {
+	var empty []*models.SummaryTemplate
+	for i := range items {
+		if strings.TrimSpace(items[i].Model) == "" {
+			empty = append(empty, &items[i])
+		}
+	}
+	if len(empty) == 0 {
+		return false
+	}
+	model := h.pickModel(ctx, items)
+	if model == "" {
+		return false
+	}
+	for _, t := range empty {
+		t.Model = model
+		if err := h.summaryRepo.Update(ctx, t); err != nil {
+			logger.Warn("Could not set template model", "name", t.Name, "error", err)
+		}
+	}
+	logger.Info("Set model on summary templates", "model", model, "count", len(empty))
+	return true
+}
+
+// ensureDefaultTemplate makes the shipped Default the default template when
+// none is marked.
+func (h *Handler) ensureDefaultTemplate(ctx context.Context) {
+	items, _, err := h.summaryRepo.List(ctx, 0, 1000)
+	if err != nil {
+		return
+	}
+	for _, t := range items {
+		if t.IsDefault {
+			return
+		}
+	}
+	for _, t := range items {
+		if t.BuiltinKey == "default" {
+			if err := h.summaryRepo.SetDefaultTemplate(ctx, t.ID); err == nil {
+				logger.Info("Marked the built-in Default template as default")
+			}
+			return
+		}
+	}
+}
+
+// ResetSummaryTemplate restores a built-in template
+// @Summary Reset a built-in template
+// @Description Restores the shipped name, description, prompt, auto tags and speaker setting. Model, Reasoning, Enabled and Default are kept.
+// @Tags summaries
+// @Produce json
+// @Param id path string true "Template ID"
+// @Success 200 {object} models.SummaryTemplate
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /api/v1/summaries/{id}/reset [post]
+func (h *Handler) ResetSummaryTemplate(c *gin.Context) {
+	ctx := c.Request.Context()
+	t, err := h.summaryRepo.FindByID(ctx, c.Param("id"))
+	if err != nil || t == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Template not found"})
+		return
+	}
+	lib := builtinByKey(t.BuiltinKey)
+	if lib == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only built-in templates can be reset"})
+		return
+	}
+	applyLibrary(t, *lib)
+	if err := h.summaryRepo.Update(ctx, t); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset template"})
+		return
+	}
+	out := []models.SummaryTemplate{*t}
+	annotateTemplates(out)
+	c.JSON(http.StatusOK, out[0])
+}
+
+// SetTemplateEnabledRequest turns a template on or off.
+type SetTemplateEnabledRequest struct {
+	Enabled *bool `json:"enabled" binding:"required"`
+}
+
+// SetSummaryTemplateEnabled enables or disables a template
+// @Summary Enable or disable a template
+// @Description Disabled templates are kept but never run automatically and are hidden from the Summarize dialog. The default template cannot be disabled.
 // @Tags summaries
 // @Accept json
 // @Produce json
-// @Param request body ApplyTemplateLibraryRequest true "Template names"
-// @Success 200 {object} map[string]int
+// @Param id path string true "Template ID"
+// @Param request body SetTemplateEnabledRequest true "Enabled"
+// @Success 200 {object} models.SummaryTemplate
 // @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
 // @Security ApiKeyAuth
 // @Security BearerAuth
-// @Router /api/v1/summaries/library [post]
-func (h *Handler) ApplyTemplateLibrary(c *gin.Context) {
-	var req ApplyTemplateLibraryRequest
+// @Router /api/v1/summaries/{id}/enabled [put]
+func (h *Handler) SetSummaryTemplateEnabled(c *gin.Context) {
+	var req SetTemplateEnabledRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	ctx := c.Request.Context()
-	items, _, err := h.summaryRepo.List(ctx, 0, 1000)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list templates"})
+	t, err := h.summaryRepo.FindByID(ctx, c.Param("id"))
+	if err != nil || t == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Template not found"})
 		return
 	}
-	model, hasDefault := libraryModel(items, h.summarySettings(ctx).DefaultModel)
-	if m := strings.TrimSpace(req.Model); m != "" {
-		model = m
+	if t.IsDefault && !*req.Enabled {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "The default template cannot be disabled. Make another template the default first."})
+		return
 	}
-	want := map[string]bool{}
-	for _, n := range req.Names {
-		want[strings.ToLower(strings.TrimSpace(n))] = true
+	v := *req.Enabled
+	t.Enabled = &v
+	if err := h.summaryRepo.Update(ctx, t); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update template"})
+		return
 	}
-	// Check before writing anything, so a request never stops half done.
-	for _, lib := range templateLibrary {
-		if want[strings.ToLower(lib.Name)] && findLibraryMatch(lib, items) == nil && model == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Choose a model for the new templates."})
-			return
+	out := []models.SummaryTemplate{*t}
+	annotateTemplates(out)
+	c.JSON(http.StatusOK, out[0])
+}
+
+// sortTemplates orders templates: the default, then built-ins in shipped
+// order, then the rest by name.
+func sortTemplates(items []models.SummaryTemplate) {
+	rank := func(t models.SummaryTemplate) int {
+		if t.IsDefault {
+			return -1
 		}
-	}
-	created, updated := 0, 0
-	for _, lib := range templateLibrary {
-		if !want[strings.ToLower(lib.Name)] {
-			continue
-		}
-		desc := lib.Description
-		if t := findLibraryMatch(lib, items); t != nil {
-			t.Name, t.Description, t.Prompt = lib.Name, &desc, lib.Prompt
-			t.AutoTags = models.StringList(append([]string{}, lib.AutoTags...))
-			t.IncludeSpeakerInfo = lib.Speakers
-			if err := h.summaryRepo.Update(ctx, t); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update " + lib.Name})
-				return
+		for i, lib := range templateLibrary {
+			if lib.Key == t.BuiltinKey {
+				return i
 			}
-			updated++
-			continue
 		}
-		t := &models.SummaryTemplate{Name: lib.Name, Description: &desc, Prompt: lib.Prompt, Model: model,
-			AutoTags: models.StringList(append([]string{}, lib.AutoTags...)), IncludeSpeakerInfo: lib.Speakers}
-		if err := h.summaryRepo.Create(ctx, t); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create " + lib.Name})
-			return
-		}
-		if lib.Name == "Default" && !hasDefault {
-			_ = h.summaryRepo.SetDefaultTemplate(ctx, t.ID)
-			hasDefault = true
-		}
-		created++
+		return len(templateLibrary)
 	}
-	c.JSON(http.StatusOK, gin.H{"created": created, "updated": updated})
+	sort.SliceStable(items, func(i, j int) bool {
+		ri, rj := rank(items[i]), rank(items[j])
+		if ri != rj {
+			return ri < rj
+		}
+		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+	})
 }

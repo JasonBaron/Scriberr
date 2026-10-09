@@ -20,7 +20,6 @@ import { CLISettingsTab } from "../components/CLISettingsTab";
 import { AutoSummarySetting } from "../components/AutoSummarySetting";
 import { SummaryRunPanel } from "../components/SummaryRunPanel";
 import { TagVocabularySettings } from "../components/TagVocabularySettings";
-import { TemplateLibraryPanel } from "../components/TemplateLibraryPanel";
 import { useAuth } from "@/features/auth/hooks/useAuth";
 
 export function Settings() {
@@ -149,11 +148,10 @@ export function Settings() {
               <AutoSummarySetting disabled={!llmConfigured} />
               <TagVocabularySettings disabled={!llmConfigured} />
               <SummaryRunPanel disabled={!llmConfigured} />
-              <TemplateLibraryPanel disabled={!llmConfigured} onApplied={() => setSummaryRefresh((n) => n + 1)} />
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4">
                 <div>
                   <h3 className="text-lg font-medium text-[var(--text-primary)]">Summarization Templates</h3>
-                  <p className="text-sm text-[var(--text-secondary)] mt-1">Create and manage prompts used to summarize transcripts.</p>
+                  <p className="text-sm text-[var(--text-secondary)] mt-1">Built-in templates are added automatically. Turn them on or off, edit them, or reset them to the shipped version. Each runs on its recording type or topic.</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <Button

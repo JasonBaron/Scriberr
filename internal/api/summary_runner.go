@@ -396,7 +396,7 @@ func (h *Handler) queueTagTemplates(ctx context.Context, jobID, reason string) i
 	}
 	var tasks []summaryTask
 	for _, tpl := range tpls {
-		if tpl.IsDefault || !matchesAnyTag(tpl.AutoTags, job.Tags) {
+		if tpl.IsDefault || !tpl.IsEnabled() || !matchesAnyTag(tpl.AutoTags, job.Tags) {
 			continue
 		}
 		if exists, _ := h.summaryRepo.HasTemplateSummary(ctx, jobID, tpl.ID); exists {

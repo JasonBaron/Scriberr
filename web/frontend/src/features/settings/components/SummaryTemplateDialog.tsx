@@ -17,6 +17,9 @@ export interface SummaryTemplate {
   reasoning?: boolean;
   is_default?: boolean;
   auto_tags?: string[];
+  enabled?: boolean;
+  builtin_key?: string;
+  customized?: boolean;
   created_at?: string;
   updated_at?: string;
 }
