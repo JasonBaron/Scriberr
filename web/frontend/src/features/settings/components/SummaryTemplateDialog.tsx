@@ -16,6 +16,7 @@ export interface SummaryTemplate {
   include_speaker_info?: boolean;
   reasoning?: boolean;
   is_default?: boolean;
+  auto_tags?: string[];
   created_at?: string;
   updated_at?: string;
 }
@@ -35,6 +36,7 @@ export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial }: S
   const [includeSpeakerInfo, setIncludeSpeakerInfo] = useState(false);
   const [reasoning, setReasoning] = useState(false);
   const [isDefault, setIsDefault] = useState(false);
+  const [autoTags, setAutoTags] = useState("");
   const [saving, setSaving] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const { getAuthHeaders } = useAuth();
@@ -48,6 +50,7 @@ export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial }: S
       setIncludeSpeakerInfo(initial?.include_speaker_info || false);
       setReasoning(initial?.reasoning || false);
       setIsDefault(initial?.is_default || false);
+      setAutoTags((initial?.auto_tags || []).join(", "));
       // Load models when dialog opens
       (async () => {
         try {
@@ -76,7 +79,8 @@ export function SummaryTemplateDialog({ open, onOpenChange, onSave, initial }: S
         prompt: prompt.trim(),
         include_speaker_info: includeSpeakerInfo,
         reasoning,
-        is_default: isDefault
+        is_default: isDefault,
+        auto_tags: autoTags.split(",").map(t => t.trim()).filter(Boolean)
       });
       onOpenChange(false);
     } finally {
@@ -174,6 +178,23 @@ Summarize the following transcript into concise bullet points. Focus on key deci
               Off is faster and uses fewer tokens. Only affects reasoning models such as qwen3 or deepseek-r1.
             </p>
           </div>
+
+          {/* Tag-linked runs */}
+          <FormField
+            label="Run automatically for these tags"
+            htmlFor="autoTags"
+            optional
+            description="Comma-separated. With automatic summaries on, this template also runs on recordings that get one of these tags. Not used for the default template."
+          >
+            <Input
+              id="autoTags"
+              value={autoTags}
+              onChange={(e) => setAutoTags(e.target.value)}
+              placeholder="e.g. therapy, counseling"
+              className={inputClassName}
+              disabled={isDefault}
+            />
+          </FormField>
 
           {/* Default Toggle */}
           <SwitchField

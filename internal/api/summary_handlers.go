@@ -8,16 +8,18 @@ import (
 	"gorm.io/gorm"
 
 	"scriberr/internal/models"
+	"scriberr/internal/titles"
 )
 
 type SummaryTemplateRequest struct {
-	Name               string  `json:"name" binding:"required,min=1"`
-	Description        *string `json:"description"`
-	Model              string  `json:"model" binding:"required,min=1"`
-	Prompt             string  `json:"prompt" binding:"required,min=1"`
-	IncludeSpeakerInfo *bool   `json:"include_speaker_info"`
-	Reasoning          *bool   `json:"reasoning"`
-	IsDefault          *bool   `json:"is_default"`
+	Name               string   `json:"name" binding:"required,min=1"`
+	Description        *string  `json:"description"`
+	Model              string   `json:"model" binding:"required,min=1"`
+	Prompt             string   `json:"prompt" binding:"required,min=1"`
+	IncludeSpeakerInfo *bool    `json:"include_speaker_info"`
+	Reasoning          *bool    `json:"reasoning"`
+	IsDefault          *bool    `json:"is_default"`
+	AutoTags           []string `json:"auto_tags"`
 }
 
 // applyTemplateFlags copies the optional flags from a request onto a template.
@@ -30,6 +32,9 @@ func applyTemplateFlags(item *models.SummaryTemplate, req SummaryTemplateRequest
 	}
 	if req.IsDefault != nil {
 		item.IsDefault = *req.IsDefault
+	}
+	if req.AutoTags != nil {
+		item.AutoTags = models.StringList(titles.CleanUserTags(req.AutoTags))
 	}
 }
 

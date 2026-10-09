@@ -18,6 +18,7 @@ import { SummaryTemplateDialog, type SummaryTemplate } from "../components/Summa
 import { SummaryTemplatesTable } from "../components/SummaryTemplatesTable";
 import { CLISettingsTab } from "../components/CLISettingsTab";
 import { AutoSummarySetting } from "../components/AutoSummarySetting";
+import { SummaryRunPanel } from "../components/SummaryRunPanel";
 import { useAuth } from "@/features/auth/hooks/useAuth";
 
 export function Settings() {
@@ -144,6 +145,7 @@ export function Settings() {
           <TabsContent value="summary" className="space-y-6">
             <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-[var(--radius-card)] p-4 sm:p-6 shadow-sm">
               <AutoSummarySetting disabled={!llmConfigured} />
+              <SummaryRunPanel disabled={!llmConfigured} />
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4">
                 <div>
                   <h3 className="text-lg font-medium text-[var(--text-primary)]">Summarization Templates</h3>
@@ -175,9 +177,9 @@ export function Settings() {
                 const headers: HeadersInit = { 'Content-Type': 'application/json', ...getAuthHeaders() };
                 try {
                   if (tpl.id) {
-                    await fetch(`/api/v1/summaries/${tpl.id}`, { method: 'PUT', headers, body: JSON.stringify({ name: tpl.name, description: tpl.description, model: tpl.model, prompt: tpl.prompt, include_speaker_info: tpl.include_speaker_info, reasoning: tpl.reasoning, is_default: tpl.is_default }) });
+                    await fetch(`/api/v1/summaries/${tpl.id}`, { method: 'PUT', headers, body: JSON.stringify({ name: tpl.name, description: tpl.description, model: tpl.model, prompt: tpl.prompt, include_speaker_info: tpl.include_speaker_info, reasoning: tpl.reasoning, is_default: tpl.is_default, auto_tags: tpl.auto_tags }) });
                   } else {
-                    await fetch('/api/v1/summaries', { method: 'POST', headers, body: JSON.stringify({ name: tpl.name, description: tpl.description, model: tpl.model, prompt: tpl.prompt, include_speaker_info: tpl.include_speaker_info, reasoning: tpl.reasoning, is_default: tpl.is_default }) });
+                    await fetch('/api/v1/summaries', { method: 'POST', headers, body: JSON.stringify({ name: tpl.name, description: tpl.description, model: tpl.model, prompt: tpl.prompt, include_speaker_info: tpl.include_speaker_info, reasoning: tpl.reasoning, is_default: tpl.is_default, auto_tags: tpl.auto_tags }) });
                   }
                 } finally {
                   // Invalidate cache to propagate changes

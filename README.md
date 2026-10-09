@@ -78,23 +78,25 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | | One-sentence brief per recording, shown in the list |
 | | Optional automatic summary after each transcription (Settings > Summary), using the default template; waits for the GPU with a local model |
 | | Recorded date read from file metadata (QuickTime/MP4 `creation_time`, WAV/BWF dates), else the file's modified time; used in the list, the job page and suggested titles |
+| fork-features-2 | SHA-256 of every upload stored; uploading a file that is already in Scriberr warns and names the earlier recording. Existing recordings are hashed in the background on first start |
+| | File Info in the job menu: original name, format, codec, duration, sample rate, channels, bit rate, recorded and upload dates, SHA-256 with links to recordings of the same file, and every embedded tag |
+| | One folder per recording (`data/recordings/<upload-date>_<job-id>/`): audio, `metadata.json`, `transcript.json`, `summaries/*.md`, and `processing/` (model output, job log). Existing recordings are moved there on first start |
+| | Export (.zip) in the job menu: the recording folder (audio, metadata, transcript, summaries, job log) as one download. `GET /api/v1/transcription/:id/export` |
+| | List refreshes while jobs run and shows the pipeline stage and summary status |
 
-### In progress (fork-features-2)
+### In progress (fork-features-3)
 
 | Change |
 |---|
-| SHA-256 of every upload stored; uploading a file that is already in Scriberr warns and names the earlier recording. Existing recordings are hashed in the background on first start |
-| File Info in the job menu: original name, format, codec, duration, sample rate, channels, bit rate, recorded and upload dates, SHA-256 with links to recordings of the same file, and every embedded tag |
-| One folder per recording (`data/recordings/<upload-date>_<job-id>/`): audio, `metadata.json`, `transcript.json`, `summaries/*.md`, and `processing/` (model output, job log). Existing recordings are moved there on first start |
-| Export (.zip) in the job menu: the recording folder (audio, metadata, transcript, summaries, job log) as one download. `GET /api/v1/transcription/:id/export` |
+| Summarize existing recordings (Settings > Summary): recordings without a summary, with a tag, or all, using the default or any template. Runs in the background one at a time, with progress, cancel and a dry-run count. `POST/GET/DELETE /api/v1/summaries/run` |
+| Tag-linked templates: a template can list tags (for example `therapy`). With automatic summaries on, recordings with one of those tags also get that template's summary after the default one, including when the tag is added later |
 
 ### Next
 
 | Item | Notes |
 |---|---|
 | fork-fixes-5: YouTube | Transcripts do not appear after adding a video; Shorts links are not accepted |
-| fork-features-2: recordings as units | Per-recording folders, zip export |
-| fork-features-3: speakers and tags | Speaker ranges per profile, speaker names in summaries, real tags (from the suggestions) with filtering, template chosen by tag or profile |
+| fork-features-4: speaker voice ID | Enroll voices, match PyAnnote embeddings, rename speakers automatically; fingerprints stay local |
 | Progress and ETA | Per-model estimates from measured real-time factors |
 | Metrics | Processing time, model and RTF per job in the UI |
 | Transcript search | Search inside transcript text, not only titles |

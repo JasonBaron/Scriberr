@@ -88,6 +88,9 @@ export function SummaryTemplatesTable({ onEdit, refreshTrigger = 0, disabled = f
                   {tpl.is_default && (
                     <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--brand-solid)]/10 text-[var(--brand-solid)]">Default</span>
                   )}
+                  {!tpl.is_default && (tpl.auto_tags?.length ?? 0) > 0 && (
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[var(--bg-main)] text-[var(--text-tertiary)] border border-[var(--border-subtle)]">Auto: {tpl.auto_tags!.join(", ")}</span>
+                  )}
                   {tpl.reasoning && (
                     <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--bg-main)] text-[var(--text-tertiary)] border border-[var(--border-subtle)]">Reasoning</span>
                   )}

@@ -833,6 +833,70 @@ func (suite *APIHandlerTestSuite) TestRecordingFolders() {
 	assert.Equal(t, filepath.Join(root, store.FolderName(plainJob.ID, time.Now()), "audio.wav"), renamed.AudioPath)
 }
 
+// Test the bulk summary run API (the worker is not started in tests, so
+// tasks stay queued)
+func (suite *APIHandlerTestSuite) TestSummaryRunAPI() {
+	t := suite.T()
+	db := suite.helper.DB
+
+	w := suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/run", map[string]interface{}{}, false)
+	assert.Equal(t, 400, w.Code, "a selection is required")
+
+	tpl := &models.SummaryTemplate{Name: "Default", Model: "m", Prompt: "p", IsDefault: true}
+	assert.NoError(t, db.Create(tpl).Error)
+	therapy := &models.SummaryTemplate{Name: "Therapy", Model: "m", Prompt: "p", AutoTags: models.StringList{"therapy"}}
+	assert.NoError(t, db.Create(therapy).Error)
+
+	tr := `{"text":"hello"}`
+	done := models.TranscriptionJob{ID: "run-done", AudioPath: "a.wav", Status: models.StatusCompleted, Transcript: &tr, Tags: models.StringList{"therapy"}}
+	other := models.TranscriptionJob{ID: "run-other", AudioPath: "b.wav", Status: models.StatusCompleted, Transcript: &tr}
+	pending := models.TranscriptionJob{ID: "run-pending", AudioPath: "c.wav", Status: models.StatusPending}
+	assert.NoError(t, db.Create(&done).Error)
+	assert.NoError(t, db.Create(&other).Error)
+	assert.NoError(t, db.Create(&pending).Error)
+
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/run", map[string]interface{}{"tag": "therapy", "dry_run": true}, false)
+	assert.Equal(t, 200, w.Code)
+	var dry api.SummaryRunResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &dry))
+	assert.Equal(t, []string{"run-done"}, dry.JobIDs)
+	assert.Equal(t, 0, dry.Queued)
+
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/run", map[string]interface{}{"missing_only": true}, false)
+	assert.Equal(t, 202, w.Code)
+	var run api.SummaryRunResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &run))
+	assert.Equal(t, 2, run.Matched, "only completed, transcribed recordings")
+	assert.Equal(t, 2, run.Queued)
+	assert.Equal(t, "Default", run.Template)
+
+	var job models.TranscriptionJob
+	assert.NoError(t, db.First(&job, "id = ?", "run-done").Error)
+	assert.Equal(t, models.SummaryQueued, job.SummaryStatus)
+
+	w = suite.makeAuthenticatedRequest("GET", "/api/v1/summaries/run", nil, false)
+	var st api.SummaryRunStatus
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &st))
+	assert.True(t, st.Running)
+	assert.Equal(t, 2, st.Queued)
+
+	w = suite.makeAuthenticatedRequest("DELETE", "/api/v1/summaries/run", nil, false)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), `"cancelled":2`)
+	var cleared models.TranscriptionJob
+	assert.NoError(t, db.First(&cleared, "id = ?", "run-done").Error)
+	assert.Empty(t, cleared.SummaryStatus)
+
+	// Template auto_tags round-trip through the API, cleaned
+	w = suite.makeAuthenticatedRequest("PUT", "/api/v1/summaries/"+therapy.ID, map[string]interface{}{
+		"name": "Therapy", "model": "m", "prompt": "p", "auto_tags": []string{" Therapy ", "#Counseling"},
+	}, false)
+	assert.Equal(t, 200, w.Code)
+	var updated models.SummaryTemplate
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &updated))
+	assert.Equal(t, models.StringList{"therapy", "counseling"}, updated.AutoTags)
+}
+
 // Test error responses for non-existent resources
 func (suite *APIHandlerTestSuite) TestNotFoundErrors() {
 	endpoints := []string{

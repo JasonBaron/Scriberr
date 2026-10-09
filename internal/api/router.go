@@ -215,6 +215,9 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 			summaries.GET("/:id", handler.GetSummaryTemplate)
 			summaries.PUT("/:id", handler.UpdateSummaryTemplate)
 			summaries.DELETE("/:id", handler.DeleteSummaryTemplate)
+			summaries.GET("/run", handler.GetSummaryRun)
+			summaries.POST("/run", handler.StartSummaryRun)
+			summaries.DELETE("/run", handler.CancelSummaryRun)
 			summaries.GET("/settings", handler.GetSummarySettings)
 			summaries.POST("/settings", handler.SaveSummarySettings)
 		}

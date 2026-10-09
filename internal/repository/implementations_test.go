@@ -218,3 +218,34 @@ func TestSummaryStatus(t *testing.T) {
 	require.NoError(t, db.First(&j, "id = ?", "1").Error)
 	require.Empty(t, j.SummaryStatus)
 }
+
+func TestSummaryRunCandidates(t *testing.T) {
+	_, db := newTestJobRepository(t)
+	require.NoError(t, db.AutoMigrate(&models.SummaryTemplate{}, &models.Summary{}))
+	repo := NewSummaryRepository(db)
+	ctx := context.Background()
+	tr := "{}"
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "1", AudioPath: "a", Status: models.StatusCompleted, Transcript: &tr, Tags: models.StringList{"therapy"}}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "2", AudioPath: "b", Status: models.StatusCompleted, Transcript: &tr}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "3", AudioPath: "c", Status: models.StatusFailed, Transcript: &tr}).Error)
+	tpl := "tpl"
+	require.NoError(t, repo.SaveSummary(ctx, &models.Summary{TranscriptionID: "2", TemplateID: &tpl, Model: "m", Content: "x"}))
+
+	all, err := repo.SummaryRunCandidates(ctx, SummaryRunFilter{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"1", "2"}, all)
+
+	missing, err := repo.SummaryRunCandidates(ctx, SummaryRunFilter{MissingOnly: true})
+	require.NoError(t, err)
+	require.Equal(t, []string{"1"}, missing)
+
+	tagged, err := repo.SummaryRunCandidates(ctx, SummaryRunFilter{Tag: "therapy"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"1"}, tagged)
+
+	has, err := repo.HasTemplateSummary(ctx, "2", "tpl")
+	require.NoError(t, err)
+	require.True(t, has)
+	has, _ = repo.HasTemplateSummary(ctx, "1", "tpl")
+	require.False(t, has)
+}

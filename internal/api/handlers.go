@@ -55,6 +55,7 @@ type Handler struct {
 	quickTranscription  *transcription.QuickTranscriptionService
 	multiTrackProcessor *processing.MultiTrackProcessor
 	broadcaster         *sse.Broadcaster
+	summaries           *summaryRunner
 }
 
 // NewHandler creates a new handler
@@ -99,6 +100,7 @@ func NewHandler(
 		quickTranscription:  quickTranscription,
 		multiTrackProcessor: multiTrackProcessor,
 		broadcaster:         broadcaster,
+		summaries:           newSummaryRunner(),
 	}
 }
 

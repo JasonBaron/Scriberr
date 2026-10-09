@@ -20,9 +20,12 @@ type SummaryTemplate struct {
 	Reasoning bool `json:"reasoning" gorm:"default:false"`
 	// IsDefault marks the template preselected in the Summarize dialog. At
 	// most one template is the default.
-	IsDefault bool      `json:"is_default" gorm:"default:false"`
-	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	IsDefault bool `json:"is_default" gorm:"default:false"`
+	// AutoTags runs this template automatically on recordings that have any
+	// of these tags (after the default summary has tagged them).
+	AutoTags  StringList `json:"auto_tags,omitempty" gorm:"type:text"`
+	CreatedAt time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (st *SummaryTemplate) BeforeCreate(tx *gorm.DB) error {

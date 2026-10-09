@@ -405,6 +405,8 @@ type SummaryRepository interface {
 	SetTags(ctx context.Context, jobID string, tags models.StringList) error
 	TagCounts(ctx context.Context) ([]TagCount, error)
 	SetSummaryStatus(ctx context.Context, jobID, status string) error
+	HasTemplateSummary(ctx context.Context, jobID, templateID string) (bool, error)
+	SummaryRunCandidates(ctx context.Context, f SummaryRunFilter) ([]string, error)
 	ClearSummaryStatuses(ctx context.Context) (int64, error)
 }
 
@@ -767,6 +769,57 @@ func (r *summaryRepository) SetTags(ctx context.Context, jobID string, tags mode
 func (r *summaryRepository) SetSummaryStatus(ctx context.Context, jobID, status string) error {
 	return r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", jobID).
 		Update("summary_status", status).Error
+}
+
+// HasTemplateSummary reports whether a job already has a summary from the
+// given template.
+func (r *summaryRepository) HasTemplateSummary(ctx context.Context, jobID, templateID string) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.Summary{}).
+		Where("transcription_id = ? AND template_id = ?", jobID, templateID).Count(&n).Error
+	return n > 0, err
+}
+
+// SummaryRunFilter selects recordings for a bulk summary run. Only completed
+// jobs with a transcript are ever selected.
+type SummaryRunFilter struct {
+	JobIDs      []string // explicit list (other filters still apply)
+	Tag         string   // has this tag
+	MissingOnly bool     // has no summary at all
+}
+
+// SummaryRunCandidates returns the IDs of completed, transcribed jobs that
+// match the filter, oldest first.
+func (r *summaryRepository) SummaryRunCandidates(ctx context.Context, f SummaryRunFilter) ([]string, error) {
+	q := r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).
+		Where("status = ? AND transcript IS NOT NULL AND transcript <> ''", models.StatusCompleted)
+	if len(f.JobIDs) > 0 {
+		q = q.Where("id IN ?", f.JobIDs)
+	}
+	if f.MissingOnly {
+		q = q.Where("NOT EXISTS (SELECT 1 FROM summaries s WHERE s.transcription_id = transcription_jobs.id)")
+	}
+	var rows []models.TranscriptionJob
+	if err := q.Select("id", "tags").Order("created_at ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(rows))
+	for _, j := range rows {
+		if f.Tag != "" && !containsString(j.Tags, f.Tag) {
+			continue
+		}
+		ids = append(ids, j.ID)
+	}
+	return ids, nil
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // ClearSummaryStatuses resets automatic summaries left pending by a restart.

@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"scriberr/internal/gpu"
-	"scriberr/internal/llm"
 	"scriberr/internal/models"
 	"scriberr/pkg/logger"
 )
@@ -72,9 +70,9 @@ func (h *Handler) defaultTemplate(ctx context.Context) (*models.SummaryTemplate,
 }
 
 // AutoSummarize is registered with queue.OnJobCompleted. When automatic
-// summaries are on, it runs the default template on the finished job,
-// waiting for the GPU if a local model is used, then suggests a title and
-// tags and unloads the model like a summary started from the UI.
+// summaries are on, it queues the default template for the finished job;
+// once that summary has tagged the recording, templates linked to its tags
+// are queued too.
 func (h *Handler) AutoSummarize(jobID string) {
 	ctx := context.Background()
 	settings, err := h.summaryRepo.GetSettings(ctx)
@@ -86,68 +84,7 @@ func (h *Handler) AutoSummarize(jobID string) {
 		logger.Warn("Automatic summary skipped: no default template with a model", "job_id", jobID)
 		return
 	}
-	job, err := h.jobRepo.FindByID(ctx, jobID)
-	if err != nil || job == nil || job.Transcript == nil {
-		logger.Warn("Automatic summary skipped: no transcript", "job_id", jobID)
-		return
-	}
-	names := map[string]string{}
-	if tpl.IncludeSpeakerInfo {
-		if mappings, err := h.speakerMappingRepo.ListByJob(ctx, jobID); err == nil {
-			for _, m := range mappings {
-				names[m.OriginalSpeaker] = m.CustomName
-			}
-		}
-	}
-	content, err := buildSummaryContent(*job.Transcript, tpl.IncludeSpeakerInfo, names, tpl.Prompt)
-	if err != nil {
-		logger.Warn("Automatic summary skipped", "job_id", jobID, "error", err)
-		return
-	}
-	svc, _, err := h.getLLMService(ctx)
-	if err != nil {
-		logger.Warn("Automatic summary skipped: no LLM configured", "job_id", jobID, "error", err)
-		return
-	}
-
-	// Show the pending summary in the UI until this returns.
-	h.setSummaryStatus(jobID, models.SummaryQueued)
-	defer h.setSummaryStatus(jobID, "")
-
-	// Local models share the GPU with transcription: wait our turn.
-	release := func() {}
-	if _, local := svc.(*llm.OllamaService); local {
-		wctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
-		r, err := gpu.Acquire(wctx)
-		cancel()
-		if err != nil {
-			logger.Warn("Automatic summary skipped: GPU stayed busy", "job_id", jobID, "error", err)
-			return
-		}
-		release = r
-	}
-	defer release()
-
-	h.setSummaryStatus(jobID, models.SummaryRunning)
-	start := time.Now()
-	logger.Info("Automatic summary started", "job_id", jobID, "template", tpl.Name, "model", tpl.Model)
-	sctx, cancel := context.WithTimeout(llm.WithThinking(ctx, tpl.Reasoning), autoSummaryTimeout)
-	defer cancel()
-	resp, err := svc.ChatCompletion(sctx, tpl.Model, []llm.ChatMessage{{Role: "user", Content: content}}, 0.0)
-	if err != nil || resp == nil || len(resp.Choices) == 0 {
-		logger.Warn("Automatic summary failed", "job_id", jobID, "model", tpl.Model, "error", err)
-		unloadAfterSummary(svc, tpl.Model)
-		return
-	}
-	summary := strings.TrimSpace(resp.Choices[0].Message.Content)
-	tplID := tpl.ID
-	req := SummarizeRequest{Model: tpl.Model, TranscriptionID: jobID, TemplateID: &tplID}
-	h.persistSummary(req, summary)
-	logger.Info("Automatic summary saved", "job_id", jobID, "bytes", len(summary), "duration", time.Since(start).Round(time.Second))
-
-	h.afterSummary(ctx, req, svc, summary, summary != "")
-	unloadAfterSummary(svc, tpl.Model)
-	h.SyncRecording(ctx, jobID)
+	h.queueSummaries(summaryTask{JobID: jobID, TemplateID: tpl.ID, FollowTags: true, Reason: "automatic"})
 }
 
 func (h *Handler) setSummaryStatus(jobID, status string) {
