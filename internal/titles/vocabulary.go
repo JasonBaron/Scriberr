@@ -3,6 +3,7 @@ package titles
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -13,8 +14,7 @@ const (
 	TagYouTube   = "youtube"
 	TypeMedia    = "media"
 
-	maxTopics     = 3
-	maxStrictTags = 7
+	maxTopics = 3
 )
 
 // DefaultTypes is the built-in list of recording types, one per line as
@@ -55,7 +55,8 @@ pets: animals and their care
 travel: trips, vacations and travel planning`
 
 // DefaultSynonyms maps common model wording onto the vocabulary, one rule
-// per line: "old, other old = vocabulary tag".
+// per line: "old, other old = vocabulary tag". Rewordings only: specific
+// details (a condition, a practice, a test) stay as keywords.
 const DefaultSynonyms = `therapy session, therapy, counseling, counselling, individual counseling = individual therapy
 couples counseling, couples session, marriage counseling = couples therapy
 relationship conversation, relationship discussion, couple conversation = relationship talk
@@ -68,13 +69,13 @@ divorce, co-parenting, moving out = separation
 argument, fight, disagreement, relationship conflict = conflict
 family dynamics, family relationships = family
 kids, children, child, parenting challenges = parenting
-anxiety, depression, adhd, bipolar, bipolar disorder, stress, mentalhealth = mental health
+stress, mentalhealth, mental illness = mental health
 loss, bereavement, death = grief
-self-acceptance, self-compassion, stoicism, self-improvement = personal growth
-meditation, breathing, journaling = mindfulness
+self-improvement, self development = personal growth
+mindfulness practice = mindfulness
 symptoms, sleep, diet, neurological = health
-swallowing, voice, vocal function, throat, acid reflux, reflux, hoarseness = voice and swallowing
-blood tests, imaging, brain scan, radiology, lab results, diagnostic = medical tests
+swallowing, voice, vocal function, throat = voice and swallowing
+lab results, diagnostic, test results = medical tests
 medication, treatment, treatment options, treatment planning, home exercises, referrals = medication and treatment
 financial, money, budget, financial responsibilities, financial trust = finances
 contract, legal issues = legal
@@ -203,22 +204,47 @@ func (v Vocabulary) sensitive(tag string) bool {
 	return false
 }
 
-// StrictPrompt asks for a topic, brief, one type and topics. PII is not
-// asked for: the model flagged it from summary wording alone and was wrong
-// far more often than right, so it comes from the transcript check only.
-// name is the recording's current title or file name, a useful hint.
-func (v Vocabulary) StrictPrompt(summary, name string) string {
+// Keywords are free-form tags next to the fixed type and topics.
+const (
+	DefaultKeywords  = 3
+	MaxKeywords      = 5
+	maxKnownKeywords = 40
+)
+
+// IsFlag reports whether tag is one Scriberr sets itself as a flag rather
+// than a tag.
+func IsFlag(tag string) bool { return tag == TagSensitive || tag == TagPII }
+
+// StrictPrompt asks for a topic, brief, one type, topics and up to
+// keywords free-form tags. PII is not asked for: the model flagged it from
+// summary wording alone and was wrong far more often than right, so it
+// comes from the transcript check only. name is the recording's current
+// title or file name, a useful hint. known lists keywords already in use,
+// most used first, for reuse.
+func (v Vocabulary) StrictPrompt(summary, name string, keywords int, known []string) string {
 	var b strings.Builder
-	b.WriteString(`Read this summary of a recording and return JSON only, no other text:
-{"topic": "...", "brief": "...", "type": "...", "topics": ["..."]}
+	shape := `{"topic": "...", "brief": "...", "type": "...", "topics": ["..."]}`
+	if keywords > 0 {
+		shape = `{"topic": "...", "brief": "...", "type": "...", "topics": ["..."], "keywords": ["..."]}`
+	}
+	b.WriteString("Read this summary of a recording and return JSON only, no other text:\n" + shape + `
 
 topic: 4 to 8 words naming what the recording is specifically about. Title Case. No date, no quotes, no trailing punctuation. Avoid generic words like Recording, Conversation, Discussion, Meeting, Summary.
 brief: one plain sentence of at most 25 words saying what the recording covers, for a list view. Never include a date of birth, ID or account number, phone number, email or address.
 type: exactly one recording type from the list below, spelled exactly as shown. Decide by who is talking and the setting, not by the subject.
-topics: 1 to 3 topics from the list below, spelled exactly as shown, most important first. Only main subjects, not passing mentions. Never invent a topic.
-
-Recording types:
+topics: 2 or 3 topics from the list below, spelled exactly as shown, most important first. Use only 1 when the recording is very short or about a single thing. Only main subjects, not passing mentions. Never invent a topic.
 `)
+	if keywords > 0 {
+		b.WriteString(fmt.Sprintf(`keywords: 1 to %d specific lowercase tags of 1 or 2 words for what makes this recording distinct that the lists do not cover, such as a named condition, a practice, a role, an event or a project. Not a recording type or topic, not a person's name, not a date or number, and no diagnosis nobody stated. Use none for a very short or trivial recording.
+`, keywords))
+		if len(known) > maxKnownKeywords {
+			known = known[:maxKnownKeywords]
+		}
+		if len(known) > 0 {
+			b.WriteString("Keywords already in use (reuse one, spelled exactly, when it fits): " + strings.Join(known, ", ") + "\n")
+		}
+	}
+	b.WriteString("\nRecording types:\n")
 	for _, e := range v.Types {
 		b.WriteString("- " + e.Tag + ": " + e.Description + "\n")
 	}
@@ -236,16 +262,19 @@ Recording types:
 
 // Classified is the model's reply in strict mode.
 type Classified struct {
-	Topic  string
-	Brief  string
-	Type   string
-	Topics []string
-	PII    bool
+	Topic    string
+	Brief    string
+	Type     string
+	Topics   []string
+	Keywords []string
+	PII      bool
 }
 
 // ParseStrict reads a reply to StrictPrompt. Type and topics are mapped
-// onto the vocabulary; anything else is dropped. Replies that put
-// everything in "tags" are sorted into type and topics.
+// onto the vocabulary; anything else from those fields is dropped.
+// Keywords that turn out to be a type or topic are moved there. Replies
+// that put everything in "tags" are sorted the same way, with leftovers
+// kept as keywords.
 func (v Vocabulary) ParseStrict(raw string) (Classified, error) {
 	raw = stripThinking(raw)
 	m := jsonObjRe.FindString(raw)
@@ -253,13 +282,14 @@ func (v Vocabulary) ParseStrict(raw string) (Classified, error) {
 		return Classified{}, errors.New("no JSON object in reply")
 	}
 	var r struct {
-		Topic  string          `json:"topic"`
-		Title  string          `json:"title"`
-		Brief  string          `json:"brief"`
-		Type   string          `json:"type"`
-		Topics []string        `json:"topics"`
-		Tags   []string        `json:"tags"`
-		PII    json.RawMessage `json:"pii"`
+		Topic    string          `json:"topic"`
+		Title    string          `json:"title"`
+		Brief    string          `json:"brief"`
+		Type     string          `json:"type"`
+		Topics   []string        `json:"topics"`
+		Keywords []string        `json:"keywords"`
+		Tags     []string        `json:"tags"`
+		PII      json.RawMessage `json:"pii"`
 	}
 	if err := json.Unmarshal([]byte(m), &r); err != nil {
 		return Classified{}, err
@@ -276,23 +306,46 @@ func (v Vocabulary) ParseStrict(raw string) (Classified, error) {
 
 	out.Type = v.ResolveType(r.Type)
 	seen := map[string]bool{}
-	for _, t := range append(append([]string{}, r.Topics...), r.Tags...) {
-		if out.Type == "" {
-			if typ := v.ResolveType(t); typ != "" {
-				out.Type = typ
-				continue
-			}
+	addTopic := func(tp string) bool {
+		if tp == "" || seen[tp] {
+			return tp != ""
 		}
-		if tp := v.ResolveTopic(t); tp != "" && !seen[tp] && len(out.Topics) < maxTopics {
+		if len(out.Topics) < maxTopics {
 			seen[tp] = true
 			out.Topics = append(out.Topics, tp)
+		}
+		return true
+	}
+	takeTypeOrTopic := func(t string) bool {
+		if typ := v.ResolveType(t); typ != "" {
+			if out.Type == "" {
+				out.Type = typ
+			}
+			return true
+		}
+		return addTopic(v.ResolveTopic(t))
+	}
+	for _, t := range r.Topics {
+		takeTypeOrTopic(t)
+	}
+	var free []string
+	for _, t := range append(append([]string{}, r.Keywords...), r.Tags...) {
+		if !takeTypeOrTopic(t) {
+			free = append(free, t)
 		}
 	}
 	if out.Type == "" {
 		// A topic named as the type ("type": "finances") still counts.
-		if tp := v.ResolveTopic(r.Type); tp != "" && !seen[tp] && len(out.Topics) < maxTopics {
-			out.Topics = append(out.Topics, tp)
+		addTopic(v.ResolveTopic(r.Type))
+	}
+	kw := map[string]bool{}
+	for _, t := range free {
+		t = NormalizeTag(t)
+		if t == "" || len(t) > maxTagLen || len(strings.Fields(t)) > 3 || IsFlag(t) || t == TagYouTube || kw[t] {
+			continue
 		}
+		kw[t] = true
+		out.Keywords = append(out.Keywords, t)
 	}
 	return out, nil
 }
@@ -303,12 +356,13 @@ type Flags struct {
 	PII     bool // identifiers found in the transcript
 }
 
-// Tags assembles the final tags: type, topics, then youtube, sensitive
-// and pii. YouTube recordings are always the media type. A recording is
-// sensitive when its type or a topic is marked sensitive, or when the
-// transcript check found identifiers (pii).
-func (v Vocabulary) Tags(c Classified, f Flags) []string {
-	var out []string
+// Assemble builds the tags and the flags. Tags: type, topics, up to
+// keywords free-form keywords (folded onto known ones), then youtube.
+// Flags, kept apart and not counted as tags: sensitive when the type or a
+// topic is marked sensitive or identifiers were found, and pii when the
+// transcript check found identifiers. YouTube recordings are always the
+// media type.
+func (v Vocabulary) Assemble(c Classified, f Flags, keywords int, known []string) (tags, flags []string) {
 	typ := c.Type
 	if f.YouTube {
 		if t := v.ResolveType(TypeMedia); t != "" {
@@ -317,50 +371,61 @@ func (v Vocabulary) Tags(c Classified, f Flags) []string {
 	}
 	sensitive := false
 	if typ != "" {
-		out = append(out, typ)
+		tags = append(tags, typ)
 		sensitive = v.sensitive(typ)
 	}
 	for _, t := range c.Topics {
-		out = append(out, t)
+		tags = append(tags, t)
 		sensitive = sensitive || v.sensitive(t)
 	}
-	if f.YouTube {
-		out = append(out, TagYouTube)
+	if keywords > MaxKeywords {
+		keywords = MaxKeywords
 	}
-	// PII comes from the transcript check only; c.PII (the model's opinion)
-	// is parsed for older replies but ignored.
-	pii := f.PII
-	if sensitive || pii {
-		out = append(out, TagSensitive)
-	}
-	if pii {
-		out = append(out, TagPII)
-	}
-	if len(out) > maxStrictTags {
-		out = out[:maxStrictTags]
-	}
-	return out
-}
-
-// WithFlags adds youtube, sensitive and pii to free-form tags.
-func WithFlags(tags []string, f Flags) []string {
-	out := append([]string{}, tags...)
-	has := map[string]bool{}
-	for _, t := range out {
-		has[t] = true
-	}
-	add := func(t string) {
-		if !has[t] {
+	if keywords > 0 {
+		has := map[string]bool{}
+		for _, t := range tags {
 			has[t] = true
-			out = append(out, t)
+		}
+		n := 0
+		for _, k := range Standardize(c.Keywords, known, len(c.Keywords)) {
+			if has[k] || n == keywords {
+				continue
+			}
+			has[k] = true
+			tags = append(tags, k)
+			n++
 		}
 	}
 	if f.YouTube {
-		add(TagYouTube)
+		tags = append(tags, TagYouTube)
+	}
+	// PII comes from the transcript check only; c.PII (the model's opinion)
+	// is parsed for older replies but ignored.
+	if sensitive || f.PII {
+		flags = append(flags, TagSensitive)
 	}
 	if f.PII {
-		add(TagSensitive)
-		add(TagPII)
+		flags = append(flags, TagPII)
 	}
-	return out
+	return tags, flags
+}
+
+// SplitFlags separates free-form tags from flags and adds youtube and the
+// flags known outside the model (the non-strict mode).
+func SplitFlags(in []string, f Flags) (tags, flags []string) {
+	has := map[string]bool{}
+	for _, t := range in {
+		if IsFlag(t) || has[t] {
+			continue
+		}
+		has[t] = true
+		tags = append(tags, t)
+	}
+	if f.YouTube && !has[TagYouTube] {
+		tags = append(tags, TagYouTube)
+	}
+	if f.PII {
+		flags = []string{TagSensitive, TagPII}
+	}
+	return tags, flags
 }

@@ -913,6 +913,9 @@ func (suite *APIHandlerTestSuite) TestTaggingSettingsAndLibrary() {
 	assert.True(t, st.RedactPII)
 	assert.Equal(t, st.DefaultTagTypes, st.TagTypes)
 	assert.Equal(t, 9, st.TypeCount)
+	assert.Equal(t, 3, st.TagKeywords, "three free-form keywords by default")
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{"tag_keywords": 9}, false)
+	assert.Equal(t, 400, w.Code)
 
 	// Custom topics are saved; types equal to the default stay default
 	w = suite.makeAuthenticatedRequest("POST", "/api/v1/summaries/settings", map[string]interface{}{

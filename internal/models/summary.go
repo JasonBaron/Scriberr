@@ -60,10 +60,13 @@ type SummarySetting struct {
 	// numbers, emails and street addresses from saved summaries.
 	RedactPII *bool `json:"redact_pii" gorm:"default:true"`
 	// Tag vocabulary. Empty text means the built-in default.
-	TagStrict   *bool     `json:"tag_strict" gorm:"default:true"`
-	TagTypes    string    `json:"tag_types" gorm:"type:text"`
-	TagTopics   string    `json:"tag_topics" gorm:"type:text"`
-	TagSynonyms string    `json:"tag_synonyms" gorm:"type:text"`
+	TagStrict   *bool  `json:"tag_strict" gorm:"default:true"`
+	TagTypes    string `json:"tag_types" gorm:"type:text"`
+	TagTopics   string `json:"tag_topics" gorm:"type:text"`
+	TagSynonyms string `json:"tag_synonyms" gorm:"type:text"`
+	// TagKeywords is how many free-form keywords go next to the type and
+	// topics (0 to 5). Nil means the default, 3.
+	TagKeywords *int      `json:"tag_keywords"`
 	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
@@ -94,6 +97,8 @@ type JobSuggestion struct {
 	Title string
 	Brief string
 	Tags  StringList
+	// Flags are always replaced, even when the tags were edited by hand.
+	Flags StringList
 	// OverwriteEditedTags replaces tags the user edited by hand and clears
 	// the edited mark (retagging with "include hand-edited").
 	OverwriteEditedTags bool

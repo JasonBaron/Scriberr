@@ -123,7 +123,7 @@ func (r *jobRepository) ListWithParams(ctx context.Context, offset, limit int, s
 	// Apply search filter
 	if searchQuery != "" {
 		search := "%" + searchQuery + "%"
-		db = db.Where("title LIKE ? OR audio_path LIKE ? OR tags LIKE ?", search, search, search)
+		db = db.Where("title LIKE ? OR audio_path LIKE ? OR tags LIKE ? OR flags LIKE ?", search, search, search, search)
 	}
 
 	// Count total matching records
@@ -408,6 +408,7 @@ type SummaryRepository interface {
 	HasTemplateSummary(ctx context.Context, jobID, templateID string) (bool, error)
 	SummaryRunCandidates(ctx context.Context, f SummaryRunFilter) ([]string, error)
 	ClearSummaryStatuses(ctx context.Context) (int64, error)
+	MoveTagsToFlags(ctx context.Context, names []string) (int, error)
 }
 
 type summaryRepository struct {
@@ -735,6 +736,7 @@ func (r *summaryRepository) SaveSuggestions(ctx context.Context, jobID string, s
 		updates := map[string]interface{}{
 			"suggested_title": s.Title,
 			"suggested_tags":  s.Tags,
+			"flags":           s.Flags,
 		}
 		if s.Brief != "" {
 			updates["summary_brief"] = s.Brief
@@ -834,6 +836,48 @@ func containsString(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// MoveTagsToFlags moves the named tags (sensitive, pii) out of each
+// recording's tags into its flags. Returns how many recordings changed.
+func (r *summaryRepository) MoveTagsToFlags(ctx context.Context, names []string) (int, error) {
+	move := map[string]bool{}
+	for _, n := range names {
+		move[n] = true
+	}
+	var jobs []models.TranscriptionJob
+	if err := r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Select("id", "tags", "flags").
+		Where("tags IS NOT NULL AND tags <> '' AND tags <> 'null'").Find(&jobs).Error; err != nil {
+		return 0, err
+	}
+	changed := 0
+	for _, j := range jobs {
+		var keep models.StringList
+		flags := append(models.StringList{}, j.Flags...)
+		moved := false
+		for _, t := range j.Tags {
+			if !move[t] {
+				keep = append(keep, t)
+				continue
+			}
+			moved = true
+			if !containsString(flags, t) {
+				flags = append(flags, t)
+			}
+		}
+		if !moved {
+			continue
+		}
+		if keep == nil {
+			keep = models.StringList{}
+		}
+		if err := r.db.WithContext(ctx).Model(&models.TranscriptionJob{}).Where("id = ?", j.ID).
+			Updates(map[string]interface{}{"tags": keep, "flags": flags}).Error; err != nil {
+			return changed, err
+		}
+		changed++
+	}
+	return changed, nil
 }
 
 // ClearSummaryStatuses resets automatic summaries left pending by a restart.

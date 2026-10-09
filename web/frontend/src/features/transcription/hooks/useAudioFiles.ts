@@ -20,6 +20,7 @@ export interface AudioFile {
     duration?: number;
     suggested_tags?: string[];
     tags?: string[];
+    flags?: string[]; // set by Scriberr: sensitive, pii
     tags_edited?: boolean;
     summary_brief?: string;
     file_hash?: string;

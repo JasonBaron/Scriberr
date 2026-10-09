@@ -256,3 +256,37 @@ func TestSummaryRunCandidates(t *testing.T) {
 	has, _ = repo.HasTemplateSummary(ctx, "1", "tpl")
 	require.False(t, has)
 }
+
+func TestMoveTagsToFlags(t *testing.T) {
+	_, db := newTestJobRepository(t)
+	require.NoError(t, db.AutoMigrate(&models.SummaryTemplate{}, &models.Summary{}))
+	repo := NewSummaryRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "f1", AudioPath: "a", Tags: models.StringList{"conversation", "sensitive", "family", "pii"}}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "f2", AudioPath: "b", Tags: models.StringList{"conversation"}}).Error)
+	require.NoError(t, db.Create(&models.TranscriptionJob{ID: "f3", AudioPath: "c", Tags: models.StringList{"sensitive"}, Flags: models.StringList{"sensitive"}}).Error)
+
+	n, err := repo.MoveTagsToFlags(ctx, []string{"sensitive", "pii"})
+	require.NoError(t, err)
+	require.Equal(t, 2, n)
+	n, err = repo.MoveTagsToFlags(ctx, []string{"sensitive", "pii"})
+	require.NoError(t, err)
+	require.Equal(t, 0, n, "nothing left to move")
+
+	var f1, f3 models.TranscriptionJob
+	require.NoError(t, db.First(&f1, "id = ?", "f1").Error)
+	require.NoError(t, db.First(&f3, "id = ?", "f3").Error)
+	require.Equal(t, models.StringList{"conversation", "family"}, f1.Tags)
+	require.Equal(t, models.StringList{"sensitive", "pii"}, f1.Flags)
+	require.Empty(t, f3.Tags)
+	require.Equal(t, models.StringList{"sensitive"}, f3.Flags, "no duplicate flag")
+
+	// Flags are saved even when the tags were edited by hand
+	require.NoError(t, db.Model(&models.TranscriptionJob{}).Where("id = ?", "f2").Update("tags_edited", true).Error)
+	require.NoError(t, repo.SaveSuggestions(ctx, "f2", models.JobSuggestion{Title: "x", Tags: models.StringList{"new"}, Flags: models.StringList{"pii"}}, false))
+	var f2 models.TranscriptionJob
+	require.NoError(t, db.First(&f2, "id = ?", "f2").Error)
+	require.Equal(t, models.StringList{"conversation"}, f2.Tags)
+	require.Equal(t, models.StringList{"pii"}, f2.Flags)
+}

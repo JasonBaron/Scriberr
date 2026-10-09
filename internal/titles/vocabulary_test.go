@@ -2,6 +2,7 @@ package titles
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,27 +44,57 @@ func TestParseStrict(t *testing.T) {
 	}
 }
 
-func TestVocabularyTags(t *testing.T) {
+func TestAssemble(t *testing.T) {
 	v := NewVocabulary("", "", "")
-	got := v.Tags(Classified{Type: "conversation", Topics: []string{"technology"}}, Flags{})
-	if !reflect.DeepEqual(got, []string{"conversation", "technology"}) {
-		t.Errorf("plain: %v", got)
+	check := func(name string, gotT, gotF, wantT, wantF []string) {
+		t.Helper()
+		if !reflect.DeepEqual(gotT, wantT) || !reflect.DeepEqual(gotF, wantF) {
+			t.Errorf("%s: tags %v flags %v, want %v %v", name, gotT, gotF, wantT, wantF)
+		}
 	}
-	got = v.Tags(Classified{Type: "conversation", Topics: []string{"finances"}}, Flags{})
-	if !reflect.DeepEqual(got, []string{"conversation", "finances", "sensitive"}) {
-		t.Errorf("sensitive topic: %v", got)
+	tg, fl := v.Assemble(Classified{Type: "conversation", Topics: []string{"technology"}}, Flags{}, 3, nil)
+	check("plain", tg, fl, []string{"conversation", "technology"}, nil)
+
+	tg, fl = v.Assemble(Classified{Type: "conversation", Topics: []string{"finances"}}, Flags{}, 3, nil)
+	check("sensitive topic is a flag", tg, fl, []string{"conversation", "finances"}, []string{"sensitive"})
+
+	tg, fl = v.Assemble(Classified{Type: "personal note", Topics: []string{"personal growth"}, Keywords: []string{"Stoicisms", "amor fati"}}, Flags{YouTube: true, PII: true}, 3, []string{"stoicism"})
+	check("youtube, pii, keywords folded", tg, fl, []string{"media", "personal growth", "stoicism", "amor fati", "youtube"}, []string{"sensitive", "pii"})
+
+	tg, fl = v.Assemble(Classified{Type: "conversation", Topics: []string{"family"}, PII: true}, Flags{}, 3, nil)
+	check("model PII ignored", tg, fl, []string{"conversation", "family"}, nil)
+
+	tg, _ = v.Assemble(Classified{Type: "conversation", Topics: []string{"family"}, Keywords: []string{"a", "b", "c", "d"}}, Flags{}, 2, nil)
+	check("keyword cap", tg, nil, []string{"conversation", "family", "a", "b"}, nil)
+
+	tg, _ = v.Assemble(Classified{Type: "conversation", Topics: []string{"family"}, Keywords: []string{"a"}}, Flags{}, 0, nil)
+	check("keywords off", tg, nil, []string{"conversation", "family"}, nil)
+}
+
+func TestParseStrictKeywords(t *testing.T) {
+	v := NewVocabulary("", "", "")
+	c, err := v.ParseStrict(`{"topic":"Caring For A Parent","type":"conversation","topics":["family","caregiving","grief","health"],"keywords":["Bipolar Disorder","caregiving","anxiety","sensitive","pii","youtube","a very long keyword phrase here"]}`)
+	if err != nil {
+		t.Fatal(err)
 	}
-	got = v.Tags(Classified{Type: "personal note", Topics: []string{"personal growth"}}, Flags{YouTube: true, PII: true})
-	if !reflect.DeepEqual(got, []string{"media", "personal growth", "youtube", "sensitive", "pii"}) {
-		t.Errorf("youtube pii: %v", got)
+	if !reflect.DeepEqual(c.Topics, []string{"family", "caregiving", "grief"}) {
+		t.Errorf("topics %v", c.Topics)
 	}
-	got = v.Tags(Classified{Type: "conversation", Topics: []string{"family"}, PII: true}, Flags{})
-	if !reflect.DeepEqual(got, []string{"conversation", "family"}) {
-		t.Errorf("model PII is ignored: %v", got)
+	// caregiving is already a topic; flags, youtube and long phrases are
+	// dropped; specific details stay keywords.
+	if !reflect.DeepEqual(c.Keywords, []string{"bipolar disorder", "anxiety"}) {
+		t.Errorf("keywords %v", c.Keywords)
 	}
-	got = v.Tags(Classified{Type: "couples therapy", Topics: []string{"relationships"}}, Flags{})
-	if !reflect.DeepEqual(got, []string{"couples therapy", "relationships", "sensitive"}) {
-		t.Errorf("sensitive type: %v", got)
+}
+
+func TestPromptKeywords(t *testing.T) {
+	v := NewVocabulary("", "", "")
+	if p := v.StrictPrompt("s", "", 0, nil); strings.Contains(p, "keywords") {
+		t.Error("no keywords line when disabled")
+	}
+	p := v.StrictPrompt("s", "", 3, []string{"stoicism"})
+	if !strings.Contains(p, "1 to 3 specific") || !strings.Contains(p, "stoicism") {
+		t.Error("keywords line and known keywords expected")
 	}
 }
 
@@ -77,10 +108,10 @@ func TestCustomVocabulary(t *testing.T) {
 	}
 }
 
-func TestWithFlags(t *testing.T) {
-	got := WithFlags([]string{"stoicism", "youtube"}, Flags{YouTube: true, PII: true})
-	if !reflect.DeepEqual(got, []string{"stoicism", "youtube", "sensitive", "pii"}) {
-		t.Errorf("%v", got)
+func TestSplitFlags(t *testing.T) {
+	tg, fl := SplitFlags([]string{"stoicism", "sensitive", "youtube"}, Flags{YouTube: true, PII: true})
+	if !reflect.DeepEqual(tg, []string{"stoicism", "youtube"}) || !reflect.DeepEqual(fl, []string{"sensitive", "pii"}) {
+		t.Errorf("%v %v", tg, fl)
 	}
 }
 

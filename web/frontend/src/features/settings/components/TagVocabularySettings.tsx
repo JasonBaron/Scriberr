@@ -17,6 +17,7 @@ interface Settings {
   default_tag_types: string;
   default_tag_topics: string;
   default_tag_synonyms: string;
+  tag_keywords: number;
   type_count: number;
   topic_count: number;
 }
@@ -93,9 +94,10 @@ export function TagVocabularySettings({ disabled = false }: { disabled?: boolean
       <div>
         <h4 className="text-sm font-medium text-[var(--text-primary)]">Tags and privacy</h4>
         <p className="text-xs text-[var(--text-secondary)] mt-1 max-w-xl">
-          After the default summary, the model picks one recording type and up to three topics from fixed lists.
-          Scriberr adds <b>youtube</b> for downloaded videos, <b>pii</b> when identifiers such as a date of birth or
-          account number were spoken, and <b>sensitive</b> for sensitive types, topics or PII.
+          After the default summary, the model picks one recording type and 2 or 3 topics from fixed lists, plus a
+          few free-form keywords for specific details. Scriberr adds <b>youtube</b> for downloaded videos. The flags
+          <b> sensitive</b> (sensitive type or topic, or PII) and <b>pii</b> (a date of birth, account number or similar
+          was spoken) are kept apart from the tags.
         </p>
       </div>
 
@@ -109,6 +111,19 @@ export function TagVocabularySettings({ disabled = false }: { disabled?: boolean
           <Switch checked={s.redact_pii} disabled={disabled || saving} onCheckedChange={v => save({ redact_pii: v })} />
         </label>
       </div>
+
+      <label className="flex items-center gap-3 text-sm text-[var(--text-secondary)]">
+        Free-form keywords per recording
+        <select
+          className="h-9 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] px-2 text-sm text-[var(--text-primary)]"
+          value={s.tag_keywords}
+          onChange={e => save({ tag_keywords: Number(e.target.value) })}
+          disabled={disabled || saving || !s.tag_strict}
+          aria-label="Free-form keywords per recording"
+        >
+          {[0, 1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n === 0 ? "None" : `Up to ${n}`}</option>)}
+        </select>
+      </label>
 
       <div className="max-w-md">
         <label htmlFor="ownerName" className="text-sm text-[var(--text-secondary)]">Your name as speakers are labeled</label>

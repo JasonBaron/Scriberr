@@ -9,6 +9,8 @@ import { flagTagClass } from "@/features/transcription/utils/tagStyle";
 interface TagEditorProps {
     audioId: string;
     tags: string[];
+    // Flags set by Scriberr (sensitive, pii): shown after the tags, not editable.
+    flags?: string[];
 }
 
 const chip = "text-xs px-2 py-0.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-main)] text-[var(--text-secondary)]";
@@ -16,7 +18,7 @@ const chip = "text-xs px-2 py-0.5 rounded-full border border-[var(--border-subtl
 // TagEditor shows a recording's tags. Clicking the tag icon switches to
 // editing: remove tags, type new ones, or pick from tags used on other
 // recordings.
-export function TagEditor({ audioId, tags }: TagEditorProps) {
+export function TagEditor({ audioId, tags, flags = [] }: TagEditorProps) {
     const { toast } = useToast();
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState<string[]>(tags);
@@ -72,6 +74,9 @@ export function TagEditor({ audioId, tags }: TagEditorProps) {
                         Add tags
                     </button>
                 ) : tags.map(t => <span key={t} className={cn(chip, flagTagClass(t))}>{t}</span>)}
+                {flags.map(f => (
+                    <span key={"flag:" + f} className={cn(chip, flagTagClass(f), "ml-1")} title="Set by Scriberr">{f}</span>
+                ))}
             </div>
         );
     }

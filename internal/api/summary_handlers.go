@@ -60,6 +60,9 @@ type SummarySettingsRequest struct {
 	TagTypes      *string `json:"tag_types"`
 	TagTopics     *string `json:"tag_topics"`
 	TagSynonyms   *string `json:"tag_synonyms"`
+	// TagKeywords is how many free-form keywords go next to the type and
+	// topics, 0 to 5.
+	TagKeywords *int `json:"tag_keywords"`
 }
 
 type SummarySettingsResponse struct {
@@ -76,6 +79,7 @@ type SummarySettingsResponse struct {
 	DefaultTagTypes    string `json:"default_tag_types"`
 	DefaultTagTopics   string `json:"default_tag_topics"`
 	DefaultTagSynonyms string `json:"default_tag_synonyms"`
+	TagKeywords        int    `json:"tag_keywords"`
 	TypeCount          int    `json:"type_count"`
 	TopicCount         int    `json:"topic_count"`
 }
@@ -110,6 +114,7 @@ func settingsResponse(s *models.SummarySetting) SummarySettingsResponse {
 		DefaultTagTypes:    titles.DefaultTypes,
 		DefaultTagTopics:   titles.DefaultTopics,
 		DefaultTagSynonyms: titles.DefaultSynonyms,
+		TagKeywords:        keywordCount(s),
 		TypeCount:          len(voc.Types),
 		TopicCount:         len(voc.Topics),
 	}
@@ -358,6 +363,14 @@ func (h *Handler) SaveSummarySettings(c *gin.Context) {
 			return
 		}
 		s.TagTopics = storedList(*req.TagTopics, titles.DefaultTopics)
+	}
+	if req.TagKeywords != nil {
+		n := *req.TagKeywords
+		if n < 0 || n > titles.MaxKeywords {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Keywords must be between 0 and 5"})
+			return
+		}
+		s.TagKeywords = &n
 	}
 	if req.TagSynonyms != nil {
 		s.TagSynonyms = storedList(*req.TagSynonyms, titles.DefaultSynonyms)

@@ -18,6 +18,7 @@ type Metadata struct {
 	Status           string     `json:"status"`
 	Brief            string     `json:"brief,omitempty"`
 	Tags             []string   `json:"tags,omitempty"`
+	Flags            []string   `json:"flags,omitempty"`
 	RecordedAt       *time.Time `json:"recorded_at,omitempty"`
 	RecordedAtSource string     `json:"recorded_at_source,omitempty"`
 	UploadedAt       time.Time  `json:"uploaded_at"`
@@ -72,6 +73,7 @@ func Mirror(job *models.TranscriptionJob, summaries []models.Summary, name Summa
 		ID:               job.ID,
 		Status:           string(job.Status),
 		Tags:             job.Tags,
+		Flags:            job.Flags,
 		RecordedAt:       job.RecordedAt,
 		RecordedAtSource: job.RecordedAtSource,
 		UploadedAt:       job.CreatedAt,

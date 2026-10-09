@@ -135,10 +135,12 @@ func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, s
 
 	strict := settings.TagStrict == nil || *settings.TagStrict
 	voc := titles.NewVocabulary(settings.TagTypes, settings.TagTopics, settings.TagSynonyms)
-	var vocabulary []string
+	keywords := keywordCount(settings)
+	var vocabulary, known []string
 	prompt := ""
 	if strict {
-		prompt = voc.StrictPrompt(summary, name)
+		known = h.knownKeywords(ctx, voc)
+		prompt = voc.StrictPrompt(summary, name, keywords, known)
 	} else {
 		vocabulary = h.tagVocabulary(ctx)
 		prompt = titles.Prompt(summary, vocabulary)
@@ -165,7 +167,7 @@ func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, s
 		return err
 	}
 	var topic, brief string
-	var tags []string
+	var tags, flagTags []string
 	if strict {
 		c, perr := voc.ParseStrict(raw)
 		// A reply with no usable type or topics gets one correction.
@@ -182,13 +184,15 @@ func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, s
 		if perr != nil {
 			return fmt.Errorf("unusable reply: %w", perr)
 		}
-		topic, brief, tags = c.Topic, c.Brief, voc.Tags(c, flags)
+		topic, brief = c.Topic, c.Brief
+		tags, flagTags = voc.Assemble(c, flags, keywords, known)
 	} else {
 		sug, err := titles.Parse(raw, vocabulary)
 		if err != nil {
 			return fmt.Errorf("unusable reply: %w", err)
 		}
-		topic, brief, tags = sug.Topic, sug.Brief, titles.WithFlags(sug.Tags, flags)
+		topic, brief = sug.Topic, sug.Brief
+		tags, flagTags = titles.SplitFlags(sug.Tags, flags)
 	}
 	if settings.RedactPII == nil || *settings.RedactPII {
 		brief = pii.Redact(brief)
@@ -197,12 +201,53 @@ func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, s
 	h.ensureRecordedAt(ctx, job)
 	title := titles.Format(titles.Pattern(), jobDate(job).In(clock.Display), topic)
 	apply := titles.IsPlaceholder(current, job.AudioPath)
-	sug := models.JobSuggestion{Title: title, Brief: brief, Tags: models.StringList(tags), OverwriteEditedTags: overwriteEdited}
+	sug := models.JobSuggestion{Title: title, Brief: brief, Tags: models.StringList(tags), Flags: models.StringList(flagTags), OverwriteEditedTags: overwriteEdited}
 	if err := h.summaryRepo.SaveSuggestions(ctx, job.ID, sug, apply); err != nil {
 		return err
 	}
-	logger.Info("Saved title suggestion", "job_id", job.ID, "title", title, "tags", strings.Join(tags, ","), "applied", apply)
+	logger.Info("Saved title suggestion", "job_id", job.ID, "title", title, "tags", strings.Join(tags, ","), "flags", strings.Join(flagTags, ","), "applied", apply)
 	return nil
+}
+
+// keywordCount is how many free-form keywords to ask for (0 to 5).
+func keywordCount(s *models.SummarySetting) int {
+	if s.TagKeywords == nil {
+		return titles.DefaultKeywords
+	}
+	n := *s.TagKeywords
+	if n < 0 {
+		return 0
+	}
+	if n > titles.MaxKeywords {
+		return titles.MaxKeywords
+	}
+	return n
+}
+
+// knownKeywords returns the free-form keywords in use, most used first:
+// every tag that is not a recording type, a topic or youtube.
+func (h *Handler) knownKeywords(ctx context.Context, voc titles.Vocabulary) []string {
+	var out []string
+	for _, t := range h.tagVocabulary(ctx) {
+		if t == titles.TagYouTube || titles.IsFlag(t) || voc.ResolveType(t) == t || voc.ResolveTopic(t) == t {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// MigrateFlags moves sensitive and pii out of tags into flags (once; later
+// runs find nothing to move).
+func (h *Handler) MigrateFlags(ctx context.Context) {
+	n, err := h.summaryRepo.MoveTagsToFlags(ctx, []string{titles.TagSensitive, titles.TagPII})
+	if err != nil {
+		logger.Warn("Could not move sensitive and pii tags to flags", "error", err)
+		return
+	}
+	if n > 0 {
+		logger.Info("Moved sensitive and pii from tags to flags", "recordings", n)
+	}
 }
 
 // summarySettings returns the saved settings, or defaults.
