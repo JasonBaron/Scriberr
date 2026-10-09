@@ -812,8 +812,9 @@ func (suite *APIHandlerTestSuite) TestRecordingFolders() {
 	assert.NoError(t, os.WriteFile(filepath.Join(plain, "audio.wav"), []byte("a"), 0o644))
 	assert.NoError(t, suite.helper.DB.Model(&models.TranscriptionJob{}).Where("id = ?", plainJob.ID).Update("audio_path", filepath.Join(plain, "audio.wav")).Error)
 	suite.handler.MigrateRecordings(ctx)
-	assert.NoError(t, suite.helper.DB.First(&stored, "id = ?", plainJob.ID).Error)
-	assert.Equal(t, filepath.Join(root, store.FolderName(plainJob.ID, time.Now()), "audio.wav"), stored.AudioPath)
+	var renamed models.TranscriptionJob
+	assert.NoError(t, suite.helper.DB.First(&renamed, "id = ?", plainJob.ID).Error)
+	assert.Equal(t, filepath.Join(root, store.FolderName(plainJob.ID, time.Now()), "audio.wav"), renamed.AudioPath)
 }
 
 // Test error responses for non-existent resources
