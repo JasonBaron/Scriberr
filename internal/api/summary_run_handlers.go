@@ -61,18 +61,19 @@ func (h *Handler) StartSummaryRun(c *gin.Context) {
 		return
 	}
 	req.Tag = strings.TrimSpace(strings.ToLower(req.Tag))
-	if len(req.JobIDs) == 0 && req.Tag == "" && !req.MissingOnly && !req.All {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Choose recordings: job_ids, tag, missing_only or all"})
-		return
-	}
-	ctx := c.Request.Context()
-
+	// Retag defaults to every summarized recording; missing_only cannot apply.
 	if req.Retag {
 		req.TemplateID, req.MissingOnly = "", false
 		if len(req.JobIDs) == 0 && req.Tag == "" {
 			req.All = true
 		}
 	}
+	if len(req.JobIDs) == 0 && req.Tag == "" && !req.MissingOnly && !req.All {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Choose recordings: job_ids, tag, missing_only or all"})
+		return
+	}
+	ctx := c.Request.Context()
+
 	tplID := strings.TrimSpace(req.TemplateID)
 	tplName := ""
 	isDefault := false
