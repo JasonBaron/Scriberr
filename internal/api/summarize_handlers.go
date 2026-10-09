@@ -72,7 +72,7 @@ func (h *Handler) Summarize(c *gin.Context) {
 			reasoning = tpl.Reasoning
 		}
 	}
-	ctx = llm.WithThinking(ctx, reasoning)
+	ctx = llm.WithDeterministic(llm.WithThinking(ctx, reasoning))
 
 	// Prepare chat messages: simple single-user message with full content
 	messages := []llm.ChatMessage{{Role: "user", Content: h.preparePrompt(ctx, req.Content)}}

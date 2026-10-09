@@ -30,10 +30,10 @@ personal note: one person talking alone: voice memo, journal, reminder or reflec
 media: recorded content made for an audience: video, podcast, lecture, audiobook or guided meditation`
 
 // DefaultTopics is the built-in list of topics, in the same format.
-const DefaultTopics = `relationships: a romantic relationship: connection, needs, trust, intimacy, commitment
+const DefaultTopics = `relationships: a romantic relationship between partners: connection, needs, trust, intimacy, commitment. Not for family or friends
 !separation: separating or divorce: moving out, dividing finances or property, co-parenting arrangements
 conflict: an argument or heated disagreement happens in the recording itself
-family: parents, siblings, extended family and family history
+family: parents, siblings, extended family, family history and how a family gets along
 parenting: raising children, their needs, school and activities
 caregiving: caring for a sick, aging or disabled person or pet
 !mental health: anxiety, depression, ADHD, bipolar disorder, stress or other mental health conditions

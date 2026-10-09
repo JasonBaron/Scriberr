@@ -286,7 +286,7 @@ func (h *Handler) runSummaryTask(ctx context.Context, t summaryTask) (SummaryRun
 	h.setSummaryStatus(t.JobID, models.SummaryRunning)
 	start := time.Now()
 	logger.Info("Summary started", "job_id", t.JobID, "template", tpl.Name, "model", tpl.Model, "reason", t.Reason)
-	sctx, cancel := context.WithTimeout(llm.WithThinking(ctx, tpl.Reasoning), autoSummaryTimeout)
+	sctx, cancel := context.WithTimeout(llm.WithDeterministic(llm.WithThinking(ctx, tpl.Reasoning)), autoSummaryTimeout)
 	defer cancel()
 	resp, err := svc.ChatCompletion(sctx, tpl.Model, []llm.ChatMessage{{Role: "user", Content: content}}, 0.0)
 	if err != nil || resp == nil || len(resp.Choices) == 0 {

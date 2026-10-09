@@ -144,24 +144,43 @@ func (h *Handler) suggestFromSummary(ctx context.Context, jobID, model string, s
 		prompt = titles.Prompt(summary, vocabulary)
 	}
 
-	// Short, deterministic call. Thinking is off regardless of the template:
-	// a title does not benefit from it and it would only add latency.
-	tctx, cancel := context.WithTimeout(llm.WithThinking(context.Background(), false), 90*time.Second)
+	// Short, deterministic call: temperature 0 so the same summary gets the
+	// same tags. Thinking is off regardless of the template: a title does
+	// not benefit from it and it would only add latency.
+	tctx, cancel := context.WithTimeout(llm.WithDeterministic(llm.WithThinking(context.Background(), false)), 90*time.Second)
 	defer cancel()
-	resp, err := svc.ChatCompletion(tctx, model, []llm.ChatMessage{{Role: "user", Content: prompt}}, 0.2)
-	if err != nil || resp == nil || len(resp.Choices) == 0 {
-		if err == nil {
-			err = errors.New("empty reply")
+	messages := []llm.ChatMessage{{Role: "user", Content: prompt}}
+	ask := func() (string, error) {
+		resp, err := svc.ChatCompletion(tctx, model, messages, 0)
+		if err != nil || resp == nil || len(resp.Choices) == 0 {
+			if err == nil {
+				err = errors.New("empty reply")
+			}
+			return "", err
 		}
+		return resp.Choices[0].Message.Content, nil
+	}
+	raw, err := ask()
+	if err != nil {
 		return err
 	}
-	raw := resp.Choices[0].Message.Content
 	var topic, brief string
 	var tags []string
 	if strict {
-		c, err := voc.ParseStrict(raw)
-		if err != nil {
-			return fmt.Errorf("unusable reply: %w", err)
+		c, perr := voc.ParseStrict(raw)
+		// A reply with no usable type or topics gets one correction.
+		if perr != nil || c.Type == "" || len(c.Topics) == 0 {
+			messages = append(messages,
+				llm.ChatMessage{Role: "assistant", Content: raw},
+				llm.ChatMessage{Role: "user", Content: "That reply is missing a valid type or topics. Reply again with the same JSON shape only. type must be exactly one recording type from the list, and topics must hold 1 to 3 topics from the list, spelled exactly as shown."})
+			if raw2, err := ask(); err == nil {
+				if c2, err2 := voc.ParseStrict(raw2); err2 == nil && (perr != nil || (c2.Type != "" && len(c2.Topics) > 0)) {
+					c, perr = c2, nil
+				}
+			}
+		}
+		if perr != nil {
+			return fmt.Errorf("unusable reply: %w", perr)
 		}
 		topic, brief, tags = c.Topic, c.Brief, voc.Tags(c, flags)
 	} else {
