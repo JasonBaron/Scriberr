@@ -576,13 +576,35 @@ func (h *Handler) SeedTemplates(ctx context.Context) {
 			have[t.BuiltinKey] = true
 		}
 	}
-	added, linked := 0, 0
+	added, linked, tagged := 0, 0, 0
+	// Built-in templates linked to an older template kept that template's
+	// (often empty) auto tags, so they never ran on their recording type.
+	// A built-in without auto tags gets the shipped ones; turn a template
+	// off with its switch instead.
+	for i := range items {
+		t := &items[i]
+		if t.BuiltinKey == "" || len(t.AutoTags) > 0 {
+			continue
+		}
+		for _, lib := range templateLibrary {
+			if lib.Key == t.BuiltinKey && len(lib.AutoTags) > 0 {
+				t.AutoTags = models.StringList(append([]string{}, lib.AutoTags...))
+				if err := h.summaryRepo.Update(ctx, t); err == nil {
+					tagged++
+					logger.Info("Built-in template had no auto tags; added the shipped ones", "name", t.Name, "tags", lib.AutoTags)
+				}
+			}
+		}
+	}
 	for _, lib := range templateLibrary {
 		if have[lib.Key] {
 			continue
 		}
 		if t := findLibraryMatch(lib, items); t != nil {
 			t.BuiltinKey = lib.Key
+			if len(t.AutoTags) == 0 {
+				t.AutoTags = models.StringList(append([]string{}, lib.AutoTags...))
+			}
 			if err := h.summaryRepo.Update(ctx, t); err == nil {
 				linked++
 			}
@@ -599,6 +621,9 @@ func (h *Handler) SeedTemplates(ctx context.Context) {
 	}
 	h.fillTemplateModels(ctx, items)
 	h.ensureDefaultTemplate(ctx)
+	if tagged > 0 {
+		logger.Info("Built-in templates given their auto tags", "count", tagged)
+	}
 	if added+linked > 0 {
 		logger.Info("Built-in summary templates ready", "added", added, "linked", linked)
 	}

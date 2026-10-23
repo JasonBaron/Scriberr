@@ -91,3 +91,18 @@ func TestEnrollable(t *testing.T) {
 		}
 	}
 }
+
+func TestGoodSample(t *testing.T) {
+	good := Print{Vector: vec(1, 0), Seconds: 60, Chunks: []Chunk{{0, 8, 0.85}, {8, 16, 0.8}, {16, 24, 0.8}, {24, 32, 0.9}}}
+	if !GoodSample(good) {
+		t.Fatal("clean print should teach")
+	}
+	weak := Print{Vector: vec(1, 0), Seconds: 40, Chunks: []Chunk{{0, 8, 0.8}, {8, 16, 0.4}, {16, 24, 0.6}, {24, 32, 0.7}, {32, 40, 0.6}}}
+	if GoodSample(weak) {
+		t.Fatalf("mixed print (%.2f) should not teach", Consistency(weak))
+	}
+	few := Print{Vector: vec(1, 0), Seconds: 20, Chunks: []Chunk{{0, 8, 0.9}, {8, 16, 0.9}}}
+	if GoodSample(few) {
+		t.Fatal("two chunks are too few")
+	}
+}

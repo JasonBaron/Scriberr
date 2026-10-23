@@ -226,6 +226,11 @@ func (h *Handler) runSummaryTask(ctx context.Context, t summaryTask) (SummaryRun
 			item.Status = "failed"
 			item.Error = err.Error()
 			logger.Warn("Summary failed", "job_id", t.JobID, "template_id", t.TemplateID, "reason", t.Reason, "error", err)
+			name := item.Template
+			if name == "" {
+				name = t.TemplateID
+			}
+			h.jobNote(t.JobID, "Summary FAILED (%s): %v", name, err)
 		}
 		if !h.summaries.queuedFor(t.JobID) {
 			h.setSummaryStatus(t.JobID, "")
@@ -243,6 +248,7 @@ func (h *Handler) runSummaryTask(ctx context.Context, t summaryTask) (SummaryRun
 	item.Template = tpl.Name
 	if !t.Force {
 		if exists, _ := h.summaryRepo.HasTemplateSummary(ctx, t.JobID, t.TemplateID); exists {
+			h.jobNote(t.JobID, "Summary skipped (%s): this recording already has one", tpl.Name)
 			if t.FollowTags {
 				h.queueTagTemplates(ctx, t.JobID, t.Reason)
 			}
@@ -286,6 +292,7 @@ func (h *Handler) runSummaryTask(ctx context.Context, t summaryTask) (SummaryRun
 	h.setSummaryStatus(t.JobID, models.SummaryRunning)
 	start := time.Now()
 	logger.Info("Summary started", "job_id", t.JobID, "template", tpl.Name, "model", tpl.Model, "reason", t.Reason)
+	h.jobNote(t.JobID, "=== Summary: %s (model %s, %s) ===", tpl.Name, tpl.Model, t.Reason)
 	sctx, cancel := context.WithTimeout(llm.WithDeterministic(llm.WithThinking(ctx, tpl.Reasoning)), autoSummaryTimeout)
 	defer cancel()
 	// Long transcripts are turned into notes part by part first, so the
@@ -309,10 +316,12 @@ func (h *Handler) runSummaryTask(ctx context.Context, t summaryTask) (SummaryRun
 	req := SummarizeRequest{Model: tpl.Model, TranscriptionID: t.JobID, TemplateID: &tplID}
 	h.persistSummary(req, summary)
 	logger.Info("Summary saved", "job_id", t.JobID, "template", tpl.Name, "bytes", len(summary), "duration", time.Since(start).Round(time.Second))
+	h.jobNote(t.JobID, "Summary saved: %s, %d characters, %s", tpl.Name, len(summary), time.Since(start).Round(time.Second))
 
 	// Title, brief and tags come from the default template's summary.
 	if tpl.IsDefault {
 		h.afterSummary(ctx, req, svc, summary, true)
+		h.noteTags(ctx, t.JobID)
 	}
 	if t.FollowTags {
 		h.queueTagTemplates(ctx, t.JobID, t.Reason)
@@ -360,6 +369,8 @@ func (h *Handler) runRetagTask(ctx context.Context, t summaryTask, item SummaryR
 		return fail(err)
 	}
 	logger.Info("Retagged recording", "job_id", t.JobID, "model", tpl.Model, "duration", time.Since(start).Round(time.Second))
+	h.jobNote(t.JobID, "Retagged with %s in %s", tpl.Model, time.Since(start).Round(time.Second))
+	h.noteTags(ctx, t.JobID)
 	if t.FollowTags {
 		h.queueTagTemplates(ctx, t.JobID, t.Reason)
 	}
@@ -401,16 +412,46 @@ func (h *Handler) queueTagTemplates(ctx context.Context, jobID, reason string) i
 		return 0
 	}
 	var tasks []summaryTask
+	var queued, done, off []string
 	for _, tpl := range tpls {
-		if tpl.IsDefault || !tpl.IsEnabled() || !matchesAnyTag(tpl.AutoTags, job.Tags) {
+		if tpl.IsDefault || !matchesAnyTag(tpl.AutoTags, job.Tags) {
+			continue
+		}
+		if !tpl.IsEnabled() {
+			off = append(off, tpl.Name)
 			continue
 		}
 		if exists, _ := h.summaryRepo.HasTemplateSummary(ctx, jobID, tpl.ID); exists {
+			done = append(done, tpl.Name)
 			continue
 		}
 		tasks = append(tasks, summaryTask{JobID: jobID, TemplateID: tpl.ID, Reason: reason + " (tag)"})
+		queued = append(queued, tpl.Name)
+	}
+	switch {
+	case len(queued) > 0:
+		h.jobNote(jobID, "Tag-linked templates queued: %s", strings.Join(queued, ", "))
+	case len(done) > 0:
+		h.jobNote(jobID, "Tag-linked templates already summarized: %s", strings.Join(done, ", "))
+	case len(off) > 0:
+		h.jobNote(jobID, "Tag-linked templates are turned off: %s", strings.Join(off, ", "))
+	default:
+		h.jobNote(jobID, "No enabled template is linked to tags %s", strings.Join(job.Tags, ", "))
 	}
 	return h.queueSummaries(tasks...)
+}
+
+// noteTags writes the recording's title, tags and flags to its job log.
+func (h *Handler) noteTags(ctx context.Context, jobID string) {
+	job, err := h.jobRepo.FindByID(ctx, jobID)
+	if err != nil || job == nil {
+		return
+	}
+	title := ""
+	if job.Title != nil {
+		title = *job.Title
+	}
+	h.jobNote(jobID, "Title: %s | Tags: %s | Flags: %s", title, strings.Join(job.Tags, ", "), strings.Join(job.Flags, ", "))
 }
 
 func matchesAnyTag(want, have []string) bool {

@@ -49,6 +49,7 @@ const SpeakerRenameDialog: React.FC<SpeakerRenameDialogProps> = ({
   const [voiceNamed, setVoiceNamed] = useState<Record<string, SpeakerMapping>>({});
   const [voices, setVoices] = useState<RecordingVoices | null>(null);
   const [scanQueued, setScanQueued] = useState(false);
+  const [resummarize, setResummarize] = useState(true);
 
   // The parent re-renders many times a second during playback and passes a
   // new array each time. Compare speakers by value so the dialog does not
@@ -142,6 +143,7 @@ const SpeakerRenameDialog: React.FC<SpeakerRenameDialogProps> = ({
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           mappings: mappingsArray,
+          resummarize,
         }),
       });
 
@@ -257,6 +259,13 @@ const SpeakerRenameDialog: React.FC<SpeakerRenameDialogProps> = ({
               </div>
             )}
           </div>
+        )}
+
+        {speakers.length > 0 && (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input type="checkbox" checked={resummarize} onChange={e => setResummarize(e.target.checked)} className="h-4 w-4" />
+            Update this recording's summaries with the new names
+          </label>
         )}
 
         <DialogFooter className="gap-2">

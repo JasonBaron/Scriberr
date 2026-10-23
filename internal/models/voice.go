@@ -56,13 +56,18 @@ type VoicePrint struct {
 // VoiceProfile is a named voice built from the prints of speakers named by
 // hand.
 type VoiceProfile struct {
-	ID        string    `json:"id" gorm:"primaryKey;type:varchar(36)"`
-	Name      string    `json:"name" gorm:"type:varchar(100);not null;uniqueIndex"`
-	Vector    Floats    `json:"-" gorm:"type:text"`
-	Samples   int       `json:"samples"`
-	Seconds   float64   `json:"seconds"`
-	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	ID      string  `json:"id" gorm:"primaryKey;type:varchar(36)"`
+	Name    string  `json:"name" gorm:"type:varchar(100);not null;uniqueIndex"`
+	Vector  Floats  `json:"-" gorm:"type:text"`
+	Samples int     `json:"samples"`
+	Seconds float64 `json:"seconds"`
+	// SeedVector is a voice brought in from elsewhere (another server), kept
+	// as one more sample so the first name given here refines the voice
+	// instead of replacing it.
+	SeedVector  Floats    `json:"-" gorm:"type:text"`
+	SeedSeconds float64   `json:"seed_seconds,omitempty"`
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 // VoiceSample links a profile to a speaker in a recording.

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strings"
 
 	"scriberr/internal/models"
@@ -20,6 +21,9 @@ type SpeakerMappingRequest struct {
 // SpeakerMappingsUpdateRequest represents a bulk speaker mappings update
 type SpeakerMappingsUpdateRequest struct {
 	Mappings []SpeakerMappingRequest `json:"mappings" binding:"required"`
+	// Resummarize reruns this recording's summaries when the names changed,
+	// so they use the new names.
+	Resummarize bool `json:"resummarize"`
 }
 
 // SpeakerMappingResponse represents a speaker mapping response
@@ -150,6 +154,30 @@ func (h *Handler) UpdateSpeakerMappings(c *gin.Context) {
 		}
 		mappings = append(mappings, m)
 	}
+	// One person split over two labels: naming a label with the name a voice
+	// match gave another label confirms both, so the voice name is kept
+	// rather than dropped when the profiles are applied again.
+	typed := map[string]bool{}
+	for _, m := range mappings {
+		if m.Source != models.MappingVoice {
+			typed[strings.ToLower(m.CustomName)] = true
+		}
+	}
+	for i := range mappings {
+		if mappings[i].Source == models.MappingVoice && typed[strings.ToLower(mappings[i].CustomName)] {
+			mappings[i].Source, mappings[i].VoiceProfileID, mappings[i].Score = models.MappingUser, nil, 0
+		}
+	}
+	before := map[string]string{}
+	for _, m := range existing {
+		before[m.OriginalSpeaker] = m.CustomName
+	}
+	changed := len(before) != len(mappings)
+	for _, m := range mappings {
+		if before[m.OriginalSpeaker] != m.CustomName {
+			changed = true
+		}
+	}
 
 	// Update mappings using repository
 	if err := h.speakerMappingRepo.UpdateMappings(c.Request.Context(), jobID, mappings); err != nil {
@@ -165,5 +193,51 @@ func (h *Handler) UpdateSpeakerMappings(c *gin.Context) {
 	}
 
 	go h.enrollFromMappings(context.Background(), jobID, updatedMappings)
+	if changed {
+		h.jobNote(jobID, "Speaker names changed: %s", describeMappings(updatedMappings))
+		if req.Resummarize {
+			if n := h.resummarize(c.Request.Context(), jobID); n > 0 {
+				h.jobNote(jobID, "Summaries queued again with the new names: %d", n)
+			}
+		}
+	}
 	c.JSON(http.StatusOK, mappingResponses(updatedMappings))
+}
+
+func describeMappings(ms []models.SpeakerMapping) string {
+	parts := make([]string, 0, len(ms))
+	for _, m := range ms {
+		parts = append(parts, m.OriginalSpeaker+" = "+m.CustomName)
+	}
+	sort.Strings(parts)
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// resummarize queues every template that already summarized a recording
+// again, the default first (it also refreshes the title, brief and tags).
+// Returns how many were queued.
+func (h *Handler) resummarize(ctx context.Context, jobID string) int {
+	sums, err := h.summaryRepo.ListSummaries(ctx, jobID)
+	if err != nil || len(sums) == 0 {
+		return 0
+	}
+	seen := map[string]bool{}
+	var tasks []summaryTask
+	def, _ := h.defaultTemplate(ctx)
+	for _, s := range sums {
+		if s.TemplateID == nil || seen[*s.TemplateID] {
+			continue
+		}
+		seen[*s.TemplateID] = true
+		t := summaryTask{JobID: jobID, TemplateID: *s.TemplateID, Force: true, Reason: "speaker names changed"}
+		if def != nil && def.ID == *s.TemplateID {
+			tasks = append([]summaryTask{t}, tasks...)
+		} else {
+			tasks = append(tasks, t)
+		}
+	}
+	return h.queueSummaries(tasks...)
 }

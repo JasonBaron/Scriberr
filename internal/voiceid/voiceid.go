@@ -25,6 +25,12 @@ const (
 	MinMatchSeconds = 8.0
 	// MinEnrollSeconds is the least speech a print needs to join a profile.
 	MinEnrollSeconds = 10.0
+	// A print teaches a voice only when its chunks agree with each other:
+	// at least MinEnrollChunks of them, scoring MinEnrollScore on average
+	// against the print. A short or mixed label (one person split off, or
+	// two people under one label) would otherwise pull the voice off.
+	MinEnrollChunks = 4
+	MinEnrollScore  = 0.7
 
 	// A chunk scoring below LowChunkScore against its own speaker likely
 	// belongs to someone else.
@@ -185,6 +191,27 @@ func Assign(prints []Print, profiles []Profile, threshold float64, skip, taken m
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Speaker < out[j].Speaker })
 	return out
+}
+
+// Consistency is the duration-weighted mean score of a print's chunks
+// against the print (1 = every chunk sounds the same). 0 without chunks.
+func Consistency(p Print) float64 {
+	var sum, total float64
+	for _, c := range p.Chunks {
+		d := c.End - c.Start
+		sum += c.Score * d
+		total += d
+	}
+	if total == 0 {
+		return 0
+	}
+	return sum / total
+}
+
+// GoodSample reports whether a print is clean enough to teach a voice.
+func GoodSample(p Print) bool {
+	return len(p.Vector) > 0 && p.Seconds >= MinEnrollSeconds &&
+		len(p.Chunks) >= MinEnrollChunks && Consistency(p) >= MinEnrollScore
 }
 
 // Problem is a reason to redo a recording's speakers.

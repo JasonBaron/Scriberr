@@ -108,6 +108,7 @@ func (h *Handler) condenseLongTranscript(ctx context.Context, svc llm.Service, m
 	parts := chunkTranscript(transcript, size)
 	start := time.Now()
 	logger.Info("Long transcript: writing notes part by part", "job_id", jobID, "chars", len(transcript), "parts", len(parts))
+	h.jobNote(jobID, "Long transcript (%d characters): notes in %d parts first", len(transcript), len(parts))
 	nctx := llm.WithDeterministic(llm.WithThinking(ctx, false))
 	var notes strings.Builder
 	for i, part := range parts {

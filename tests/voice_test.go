@@ -247,3 +247,84 @@ func (suite *APIHandlerTestSuite) TestSplitStoredSegments() {
 	assert.NoError(t, suite.helper.DB.First(&got, "id = ?", job.ID).Error)
 	assert.Equal(t, before, *got.Transcript, "second run changes nothing")
 }
+
+func (suite *APIHandlerTestSuite) TestVoiceSplitPersonAndSeed() {
+	t := suite.T()
+	db := suite.helper.DB
+	for _, tbl := range []string{"voice_prints", "voice_profiles", "voice_samples", "speaker_mappings", "summary_settings"} {
+		db.Exec("DELETE FROM " + tbl)
+	}
+	// A voice copied from another server: a vector and no samples
+	christine := models.VoiceProfile{ID: "christine-id", Name: "Christine", Vector: models.Floats{0, 1, 0}, Seconds: 600}
+	assert.NoError(t, db.Create(&christine).Error)
+	repo := repository.NewVoiceRepository(db)
+	suite.handler.SetVoices(repo, nil)
+	suite.handler.RefreshVoiceProfiles(context.Background())
+	assert.NoError(t, db.First(&christine, "id = ?", "christine-id").Error)
+	assert.Equal(t, 3, len(christine.SeedVector), "a voice without samples is kept as a seed")
+
+	dir := t.TempDir()
+	audio := filepath.Join(dir, "c.wav")
+	assert.NoError(t, os.WriteFile(audio, []byte("x"), 0644))
+	printer := &fakePrinter{prints: map[string]map[string]adapters.SpeakerPrint{audio: {
+		"S0": {Embedding: []float64{1, 0, 0}, Seconds: 600, Chunks: goodChunks()},
+		"S1": {Embedding: []float64{0.1, 1, 0}, Seconds: 600, Chunks: goodChunks()},
+		// The same person split off: a little speech, chunks that disagree
+		"S2": {Embedding: []float64{0.5, 0.6, 0.4}, Seconds: 40, Chunks: []adapters.VoiceChunk{
+			{Start: 0, End: 8, Score: 0.7}, {Start: 8, End: 16, Score: 0.5}, {Start: 16, End: 24, Score: 0.6}, {Start: 24, End: 32, Score: 0.65}}},
+	}}}
+	suite.handler.SetVoices(repo, printer)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	suite.handler.StartVoiceWorker(ctx)
+
+	job := suite.newVoiceJob("c", audio, transcriptFor("S0", "S1", "S2"))
+	w := suite.makeAuthenticatedRequest("POST", "/api/v1/transcription/"+job.ID+"/voices/scan", nil, false)
+	assert.Equal(t, 200, w.Code)
+	suite.waitVoice(job.ID)
+	assert.Equal(t, "Christine", suite.mappingsOf(job.ID)["S1"].CustomName)
+	assert.Equal(t, models.MappingVoice, suite.mappingsOf(job.ID)["S1"].Source)
+
+	// Naming S2 Christine too: S1 keeps Christine (now confirmed by hand)
+	w = suite.makeAuthenticatedRequest("POST", "/api/v1/transcription/"+job.ID+"/speakers", map[string]interface{}{
+		"mappings": []map[string]string{
+			{"original_speaker": "S0", "custom_name": "S0"}, // left at its label, as the dialog sends it
+			{"original_speaker": "S1", "custom_name": "Christine"},
+			{"original_speaker": "S2", "custom_name": "Christine"},
+		},
+	}, false)
+	assert.Equal(t, 200, w.Code)
+	suite.eventually(func() bool {
+		var n int64
+		db.Model(&models.VoiceSample{}).Count(&n)
+		return n == 1
+	}, "one sample learned")
+	time.Sleep(150 * time.Millisecond) // let the library re-match finish
+	m := suite.mappingsOf(job.ID)
+	assert.Equal(t, "Christine", m["S1"].CustomName)
+	assert.Equal(t, models.MappingUser, m["S1"].Source, "confirmed by naming the split label")
+	assert.Equal(t, "Christine", m["S2"].CustomName)
+	_, s0 := m["S0"]
+	assert.False(t, s0, "a label left as is stays unnamed")
+
+	var sample models.VoiceSample
+	assert.NoError(t, db.First(&sample).Error)
+	assert.Equal(t, "S1", sample.Speaker, "only the clean print teaches the voice")
+	assert.NoError(t, db.First(&christine, "id = ?", "christine-id").Error)
+	assert.Equal(t, 1, christine.Samples)
+	assert.InDelta(t, 1200, christine.Seconds, 1, "seed and sample together")
+}
+
+func (suite *APIHandlerTestSuite) TestBuiltinTemplatesGetAutoTags() {
+	t := suite.T()
+	db := suite.helper.DB
+	db.Exec("DELETE FROM summary_templates")
+	// An older template linked to a built-in kept its empty auto tags
+	old := &models.SummaryTemplate{Name: "My Therapy", Model: "qwen3:8b", Prompt: "mine", BuiltinKey: "individual-therapy"}
+	assert.NoError(t, db.Create(old).Error)
+	suite.handler.SeedTemplates(context.Background())
+	var got models.SummaryTemplate
+	assert.NoError(t, db.First(&got, "id = ?", old.ID).Error)
+	assert.Equal(t, []string{"individual therapy"}, []string(got.AutoTags))
+	assert.Equal(t, "mine", got.Prompt, "content is kept")
+}

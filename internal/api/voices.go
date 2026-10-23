@@ -299,6 +299,7 @@ func (h *Handler) scanVoices(ctx context.Context, jobID string) (err error) {
 		}
 	}
 	named, _ := h.applyVoiceMatches(ctx, jobID)
+	h.noteVoiceScan(ctx, jobID, len(stored), problems)
 	logger.Info("Voice scan done", "job_id", jobID, "speakers", len(stored), "named", named,
 		"problems", len(problems), "duration", time.Since(start).Round(time.Second))
 	if len(problems) > 0 || named > 0 {
@@ -389,8 +390,10 @@ func absf(x float64) float64 {
 
 func roundf(x float64) float64 { return float64(int(x*1000+0.5)) / 1000 }
 
-// refreshProfile rebuilds a profile's voice from its samples. A profile
-// with no samples left is removed.
+// refreshProfile rebuilds a profile's voice from its clean samples and its
+// seed. Weak samples (short, or mixed with another voice) are left out. A
+// profile with no samples and no seed is removed; one whose samples are all
+// weak keeps its current voice.
 func (h *Handler) refreshProfile(ctx context.Context, profileID string) {
 	p, err := h.voiceRepo.GetProfile(ctx, profileID)
 	if err != nil {
@@ -400,8 +403,15 @@ func (h *Handler) refreshProfile(ctx context.Context, profileID string) {
 	if err != nil {
 		return
 	}
+	if len(samples) == 0 && len(p.SeedVector) == 0 {
+		if err := h.voiceRepo.DeleteProfile(ctx, profileID); err == nil {
+			logger.Info("Removed voice profile with no samples left", "name", p.Name)
+		}
+		return
+	}
 	var vs []voiceid.Sample
 	var secs float64
+	good := 0
 	byJob := map[string][]models.VoicePrint{}
 	for _, s := range samples {
 		prints, ok := byJob[s.TranscriptionJobID]
@@ -410,23 +420,52 @@ func (h *Handler) refreshProfile(ctx context.Context, profileID string) {
 			byJob[s.TranscriptionJobID] = prints
 		}
 		for _, pr := range prints {
-			if pr.Speaker == s.Speaker && len(pr.Vector) > 0 {
-				vs = append(vs, voiceid.Sample{Vector: pr.Vector, Seconds: pr.Seconds})
-				secs += pr.Seconds
+			if pr.Speaker != s.Speaker {
+				continue
 			}
+			if !voiceid.GoodSample(toPrints([]models.VoicePrint{pr})[0]) {
+				continue
+			}
+			vs = append(vs, voiceid.Sample{Vector: pr.Vector, Seconds: pr.Seconds})
+			secs += pr.Seconds
+			good++
 		}
 	}
-	if len(samples) == 0 {
-		if err := h.voiceRepo.DeleteProfile(ctx, profileID); err == nil {
-			logger.Info("Removed voice profile with no samples left", "name", p.Name)
-		}
-		return
+	if len(p.SeedVector) > 0 {
+		vs = append(vs, voiceid.Sample{Vector: p.SeedVector, Seconds: p.SeedSeconds})
+		secs += p.SeedSeconds
+	}
+	if len(vs) == 0 {
+		return // only weak samples: keep the voice as it is
 	}
 	p.Vector = voiceid.Centroid(vs)
-	p.Samples = len(vs)
+	p.Samples = good
 	p.Seconds = roundf(secs)
 	if err := h.voiceRepo.SaveProfile(ctx, p); err != nil {
 		logger.Warn("Could not save voice profile", "name", p.Name, "error", err)
+	}
+}
+
+// RefreshVoiceProfiles runs on start: profiles without samples keep their
+// voice as a seed (voices copied from another server), and every profile is
+// rebuilt from its clean samples.
+func (h *Handler) RefreshVoiceProfiles(ctx context.Context) {
+	if h.voiceRepo == nil {
+		return
+	}
+	profiles, err := h.voiceRepo.ListProfiles(ctx)
+	if err != nil {
+		return
+	}
+	for i := range profiles {
+		p := &profiles[i]
+		if len(p.SeedVector) == 0 && p.Samples == 0 && len(p.Vector) > 0 {
+			p.SeedVector, p.SeedSeconds = p.Vector, p.Seconds
+			if err := h.voiceRepo.SaveProfile(ctx, p); err == nil {
+				logger.Info("Voice kept as seed", "name", p.Name)
+			}
+		}
+		h.refreshProfile(ctx, p.ID)
 	}
 }
 
@@ -452,8 +491,14 @@ func (h *Handler) enrollFromMappings(ctx context.Context, jobID string, mappings
 			continue
 		}
 		pr, ok := bySpeaker[m.OriginalSpeaker]
-		if !ok || len(pr.Vector) == 0 || pr.Seconds < voiceid.MinEnrollSeconds {
+		if !ok {
 			continue
+		}
+		if !voiceid.GoodSample(toPrints([]models.VoicePrint{pr})[0]) {
+			// Too short or mixed to teach the voice; the name still applies here
+			h.jobNote(jobID, "Voice not learned from %s (%s): too little clean speech (%.0fs, consistency %.2f)",
+				m.OriginalSpeaker, m.CustomName, pr.Seconds, voiceid.Consistency(toPrints([]models.VoicePrint{pr})[0]))
+			continue // and it stops being a sample if it was one
 		}
 		prof, err := h.voiceRepo.ProfileByName(ctx, m.CustomName)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -465,10 +510,16 @@ func (h *Handler) enrollFromMappings(ctx context.Context, jobID string, mappings
 		if err != nil || prof == nil {
 			continue
 		}
+		// A voice that came without samples keeps that voice as a seed
+		if prof.Samples == 0 && len(prof.SeedVector) == 0 && len(prof.Vector) > 0 {
+			prof.SeedVector, prof.SeedSeconds = prof.Vector, prof.Seconds
+			_ = h.voiceRepo.SaveProfile(ctx, prof)
+		}
 		prev, err := h.voiceRepo.SetSample(ctx, prof.ID, jobID, m.OriginalSpeaker)
 		if err != nil {
 			continue
 		}
+		h.jobNote(jobID, "Voice learned: %s from %s (%.0fs)", prof.Name, m.OriginalSpeaker, pr.Seconds)
 		named[m.OriginalSpeaker] = true
 		touched[prof.ID] = true
 		if prev != "" {
@@ -564,5 +615,27 @@ func (h *Handler) SplitStoredSegments(ctx context.Context) {
 	}
 	if changed > 0 {
 		logger.Info("Split transcript segments at speaker changes", "recordings", changed, "duration", time.Since(start).Round(time.Second))
+	}
+}
+
+// noteVoiceScan writes a scan's result to the job log: who was named by
+// voice and any problems found.
+func (h *Handler) noteVoiceScan(ctx context.Context, jobID string, speakers int, problems []voiceid.Problem) {
+	var names []string
+	if ms, err := h.speakerMappingRepo.ListByJob(ctx, jobID); err == nil {
+		for _, m := range ms {
+			if m.Source == models.MappingVoice {
+				names = append(names, fmt.Sprintf("%s = %s (%.2f)", m.OriginalSpeaker, m.CustomName, m.Score))
+			}
+		}
+	}
+	sort.Strings(names)
+	named := "none"
+	if len(names) > 0 {
+		named = strings.Join(names, ", ")
+	}
+	h.jobNote(jobID, "Voice scan: %d speakers; named by voice: %s", speakers, named)
+	for _, p := range problems {
+		h.jobNote(jobID, "Voice scan: flagged redo: %s", p.Text)
 	}
 }

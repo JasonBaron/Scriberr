@@ -187,6 +187,7 @@ func main() {
 	handler.ResetSummaryStatuses(context.Background())
 	handler.StartSummaryWorker(context.Background())
 	handler.SetVoices(repository.NewVoiceRepository(database.DB), pyannoteAdapter)
+	handler.RefreshVoiceProfiles(context.Background())
 	handler.StartVoiceWorker(context.Background())
 	go handler.SplitStoredSegments(context.Background())
 	// Voice scan (names known speakers) first, then the automatic summary

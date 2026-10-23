@@ -100,6 +100,8 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | Speaker voice ID (Settings > Voices): each speaker in a recording gets a voice print from the PyAnnote speaker model (same environment and HF token as diarization; prints stay in the local database). Naming a speaker teaches that voice; other recordings where it speaks are named automatically (marked "named by voice" in Rename Speakers, never over a name you typed). The rename dialog also suggests close voices. Scan new recordings automatically, scan or rescan the library, match threshold, rename or delete voices. `GET/POST /api/v1/voices`, `GET /api/v1/transcription/:id/voices` |
 | Redo flag: a recording where one label holds two voices, or one voice got two labels, is flagged `redo` (search "redo"); the reason is shown in Rename Speakers |
 | The voice scan runs before the automatic summary, so summaries use the names |
+| Naming one label with the name the voice match gave another (one person split in two) keeps both; only clean prints (enough speech, chunks that agree) teach a voice, so a short or mixed label no longer pulls it off. Voices copied from another server are kept as a seed. Rename Speakers can rerun the recording's summaries with the new names |
+| Job log covers summaries, tag-linked templates (or why none ran), title and tags, and voice scans. Built-in templates linked to an older template without auto tags get the shipped ones, so the therapy template runs on therapy recordings |
 
 ### Next
 
@@ -107,6 +109,7 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 |---|---|
 | fork-fixes-5: YouTube | Transcripts do not appear after adding a video; Shorts links are not accepted |
 | Re-transcribe flagged recordings | Rerun recordings flagged `redo` (or a selection) with current settings |
+| Summary model fallback and comparison | Local model first, a cloud model when the GPU stays busy (never for sensitive recordings unless allowed); run two models on one recording side by side |
 | Progress and ETA | Per-model estimates from measured real-time factors |
 | Metrics | Processing time, model and RTF per job in the UI |
 | Transcript search | Search inside transcript text, not only titles |
