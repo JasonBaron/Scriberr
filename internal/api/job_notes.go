@@ -31,3 +31,7 @@ func (h *Handler) jobNote(jobID, format string, args ...interface{}) {
 	defer f.Close()
 	_, _ = f.WriteString(line)
 }
+
+// JobNote writes a line to a recording's job log (used by the queue for
+// retry notes).
+func (h *Handler) JobNote(jobID, msg string) { h.jobNote(jobID, "%s", msg) }

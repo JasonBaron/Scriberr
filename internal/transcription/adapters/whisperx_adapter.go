@@ -301,8 +301,11 @@ func (w *WhisperXAdapter) PrepareEnvironment(ctx context.Context) error {
 
 	whisperxPath := filepath.Join(w.envPath, "WhisperX")
 
-	// Check if WhisperX is already set up and working (using cache to speed up repeated checks)
-	if CheckEnvironmentReady(whisperxPath, "import whisperx") {
+	// Check that WhisperX really imports. "import whisperx" alone loads
+	// nothing (its modules are lazy), so a broken torch passed that check and
+	// every job failed instead.
+	ready, reason := CheckEnvironment(whisperxPath, whisperXImportCheck)
+	if ready {
 		// A working env is left on whatever commit it has; report drift from the pin.
 		if head := gitHead(whisperxPath); head != "" && !strings.HasPrefix(head, whisperXRef()) && !strings.HasPrefix(whisperXRef(), head) {
 			logger.Warn("WhisperX checkout differs from the pinned commit; delete the WhisperX folder to reinstall at the pin",
@@ -312,6 +315,10 @@ func (w *WhisperXAdapter) PrepareEnvironment(ctx context.Context) error {
 		logger.Info("WhisperX environment already ready")
 		w.initialized = true
 		return nil
+	}
+
+	if _, err := os.Stat(filepath.Join(whisperxPath, ".venv")); err == nil {
+		logger.Warn("WhisperX environment fails to import; repairing it", "error", reason)
 	}
 
 	// Ensure base directory exists
@@ -333,6 +340,13 @@ func (w *WhisperXAdapter) PrepareEnvironment(ctx context.Context) error {
 	if err := w.uvSyncWhisperX(whisperxPath); err != nil {
 		return fmt.Errorf("failed to sync WhisperX: %w", err)
 	}
+	// A sync leaves damaged files in place (it trusts package metadata), so
+	// check again and reinstall or rebuild when needed.
+	if err := repairVenv("WhisperX", whisperxPath,
+		func() (bool, string) { return CheckEnvironment(whisperxPath, whisperXImportCheck) },
+		func(extra ...string) error { return w.uvSyncWhisperX(whisperxPath, extra...) }); err != nil {
+		return err
+	}
 
 	w.migrateVADCheckpoint(whisperxPath)
 
@@ -352,6 +366,11 @@ const (
 	// vadCheckpointMarker records that the bundled VAD checkpoint was upgraded.
 	vadCheckpointMarker = ".scriberr-vad-checkpoint-migrated"
 )
+
+// whisperXImportCheck imports the modules a job uses (ASR, alignment and
+// diarization), which pulls in torch, torchaudio, ctranslate2,
+// faster-whisper, transformers and pyannote.
+const whisperXImportCheck = "import whisperx.asr, whisperx.alignment, whisperx.diarize"
 
 func whisperXRef() string {
 	if v := strings.TrimSpace(os.Getenv(EnvWhisperXRef)); v != "" {
@@ -497,8 +516,8 @@ func (w *WhisperXAdapter) updateWhisperXDependencies(whisperxPath string) error 
 }
 
 // uvSyncWhisperX runs uv sync for WhisperX
-func (w *WhisperXAdapter) uvSyncWhisperX(whisperxPath string) error {
-	cmd := exec.Command("uv", "sync", "--all-extras", "--dev", UVTLSFlag)
+func (w *WhisperXAdapter) uvSyncWhisperX(whisperxPath string, extra ...string) error {
+	cmd := exec.Command("uv", append([]string{"sync", "--all-extras", "--dev", UVTLSFlag}, extra...)...)
 	cmd.Dir = whisperxPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {

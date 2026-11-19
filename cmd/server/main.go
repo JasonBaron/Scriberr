@@ -192,6 +192,12 @@ func main() {
 	go handler.SplitStoredSegments(context.Background())
 	// Voice scan (names known speakers) first, then the automatic summary
 	queue.OnJobCompleted(handler.AfterTranscription)
+	// Failed jobs: retry what a retry can fix; repair broken Python
+	// environments (a failed import) once, then retry.
+	taskQueue.SetNotifier(handler.JobNote)
+	taskQueue.SetEnvironmentRepair(func(ctx context.Context) []error {
+		return registry.GetRegistry().RepairEnvironments(ctx, adapters.InvalidateEnvironmentCache)
+	})
 	go handler.BackfillFileHashes(context.Background())
 
 	// Set up router. Until model environments are ready, /health reports

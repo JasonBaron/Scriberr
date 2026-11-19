@@ -202,8 +202,10 @@ func (p *PyAnnoteAdapter) PrepareEnvironment(ctx context.Context) error {
 		}
 	}
 
-	// Check if PyAnnote is already available (using cache to speed up repeated checks)
-	if CheckEnvironmentReady(p.envPath, "from pyannote.audio import Pipeline") {
+	// Check that PyAnnote really imports (never cached here, so a damaged
+	// environment is caught on every start)
+	ready, reason := CheckEnvironment(p.envPath, pyannoteImportCheck)
+	if ready {
 		logger.Info("PyAnnote already available in environment")
 		// Still ensure script exists
 		if err := p.copyDiarizationScript(); err != nil {
@@ -213,21 +215,29 @@ func (p *PyAnnoteAdapter) PrepareEnvironment(ctx context.Context) error {
 		return nil
 	}
 
+	if _, err := os.Stat(filepath.Join(p.envPath, ".venv")); err == nil {
+		logger.Warn("PyAnnote environment fails to import; repairing it", "error", reason)
+	}
+
 	// Create environment if it doesn't exist or is incomplete
 	if err := p.setupPyAnnoteEnvironment(); err != nil {
 		return fmt.Errorf("failed to setup PyAnnote environment: %w", err)
 	}
 
-	// Verify PyAnnote is now available
-	testCmd := exec.Command("uv", "run", UVTLSFlag, "--project", p.envPath, "python", "-c", "from pyannote.audio import Pipeline")
-	if testCmd.Run() != nil {
-		logger.Warn("PyAnnote environment test still failed after setup")
+	// Verify, and reinstall or rebuild when the sync left it broken
+	if err := repairVenv("PyAnnote", p.envPath,
+		func() (bool, string) { return CheckEnvironment(p.envPath, pyannoteImportCheck) },
+		func(extra ...string) error { return p.syncEnvironment(extra...) }); err != nil {
+		return err
 	}
 
 	p.initialized = true
 	logger.Info("PyAnnote environment prepared successfully")
 	return nil
 }
+
+// pyannoteImportCheck imports what diarization and voice prints use.
+const pyannoteImportCheck = "import torch; from pyannote.audio import Pipeline, Inference, Model"
 
 // setupPyAnnoteEnvironment creates the Python environment
 func (p *PyAnnoteAdapter) setupPyAnnoteEnvironment() error {
@@ -275,8 +285,8 @@ func (p *PyAnnoteAdapter) writePyproject() (bool, error) {
 }
 
 // syncEnvironment runs uv sync in the PyAnnote env directory.
-func (p *PyAnnoteAdapter) syncEnvironment() error {
-	cmd := exec.Command("uv", "sync", UVTLSFlag)
+func (p *PyAnnoteAdapter) syncEnvironment(extra ...string) error {
+	cmd := exec.Command("uv", append([]string{"sync", UVTLSFlag}, extra...)...)
 	cmd.Dir = p.envPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {

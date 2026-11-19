@@ -52,6 +52,7 @@ export interface AudioFile {
     id: string;
     title?: string;
     status: "uploaded" | "pending" | "processing" | "completed" | "failed";
+    error_message?: string | null;
     created_at: string;
     audio_path: string;
     diarization?: boolean;

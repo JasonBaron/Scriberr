@@ -136,6 +136,8 @@ func SetupRoutes(handler *Handler, authService *auth.AuthService) *gin.Engine {
 			transcription.POST("/youtube", handler.DownloadFromYouTube)
 			transcription.POST("/submit", handler.SubmitJob)
 			transcription.POST("/:id/start", handler.StartTranscription)
+			transcription.POST("/:id/retry", handler.RetryTranscription)
+			transcription.POST("/retry-failed", handler.RetryFailedTranscriptions)
 			transcription.POST("/:id/kill", handler.KillJob)
 			transcription.GET("/:id/logs", handler.GetJobLogs)
 			transcription.GET("/:id/status", handler.GetJobStatus)

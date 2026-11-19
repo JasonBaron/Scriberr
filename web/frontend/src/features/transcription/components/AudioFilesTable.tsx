@@ -10,6 +10,7 @@ import {
 	Check,
 	AlertCircle,
 	Clock,
+	RotateCcw,
 	X
 } from "lucide-react";
 import { WandAdvancedIcon } from "@/components/icons/WandAdvancedIcon";
@@ -49,6 +50,7 @@ import { DebouncedSearchInput } from "@/components/DebouncedSearchInput";
 import { SwipeableItem } from "@/components/ui/swipeable-item";
 import { useSwipeHint } from "@/hooks/use-swipe-hint";
 import { flagTagClass } from "../utils/tagStyle";
+import { failureReason, retryJobs } from "../utils/failure";
 
 
 
@@ -472,6 +474,25 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 		}
 	}, [selectedFile, getAuthHeaders, refetch]);
 
+	// Retry failed transcriptions with their saved settings
+	const [retrying, setRetrying] = useState(false);
+	const [retryNote, setRetryNote] = useState<string | null>(null);
+	const handleRetry = useCallback(async (ids: string[]) => {
+		setRetrying(true);
+		setRetryNote(null);
+		try {
+			const r = await retryJobs(getAuthHeaders(), ids);
+			setRetryNote(r.queued === 0 ? "Nothing to retry." : `Queued ${r.queued} recording${r.queued === 1 ? "" : "s"} again.`);
+			if (ids.length > 1) setRowSelection({});
+			refetch();
+		} catch (e) {
+			setRetryNote(e instanceof Error ? e.message : "Retry failed");
+		} finally {
+			setRetrying(false);
+		}
+	}, [getAuthHeaders, refetch]);
+	const failedCount = data.filter(f => f.status === "failed").length;
+
 	// Bulk Actions Handlers
 	const handleBulkTranscribe = useCallback(async (params: WhisperXParams) => {
 		const selectedIds = Object.keys(rowSelection);
@@ -775,6 +796,18 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 					onChange={(value) => setGlobalFilter(String(value))}
 					className="w-full sm:w-80 shadow-sm border-transparent focus:border-[var(--brand-solid)] bg-white dark:bg-zinc-900"
 				/>
+				{(failedCount > 0 || retryNote) && (
+					<div className="flex items-center gap-3">
+						{retryNote && <span className="text-sm text-[var(--text-secondary)]">{retryNote}</span>}
+						{failedCount > 0 && (
+							<Button variant="outline" size="sm" disabled={retrying} onClick={() => handleRetry([])}
+								title="Transcribe every failed recording again with the settings it last used">
+								{retrying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+								Retry failed
+							</Button>
+						)}
+					</div>
+				)}
 			</div>
 
 			{/* List Container */}
@@ -858,6 +891,16 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 													</>
 												)}
 											</div>
+											{file.status === "failed" && file.error_message && (
+												<p className="mt-0.5 text-xs text-red-600 dark:text-red-400 line-clamp-2" title={failureReason(file.error_message)}>
+													{failureReason(file.error_message)}
+												</p>
+											)}
+											{file.status === "pending" && file.error_message && /^(Retry|Repairing)/.test(file.error_message) && (
+												<p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400 line-clamp-2">
+													{file.error_message}
+												</p>
+											)}
 											{((file.tags?.length ?? 0) + (file.flags?.length ?? 0)) > 0 && (
 												<div className="flex flex-wrap gap-1 mt-1.5">
 													{[...(file.tags || []).map(t => ({ t, flag: false })), ...(file.flags || []).map(t => ({ t, flag: true }))].map(({ t: tag, flag }) => (
@@ -909,6 +952,22 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 											className="hidden md:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
 											onClick={(e) => e.stopPropagation()}
 										>
+											{file.status === "failed" && (
+												<Tooltip>
+													<TooltipTrigger asChild>
+														<Button
+															variant="ghost"
+															size="icon"
+															disabled={retrying}
+															onClick={() => handleRetry([file.id])}
+															className="h-9 w-9 rounded-lg text-gray-400 hover:text-[var(--brand-solid)] hover:bg-orange-50 cursor-pointer transition-colors"
+														>
+															<RotateCcw className="h-5 w-5" strokeWidth={2} />
+														</Button>
+													</TooltipTrigger>
+													<TooltipContent>Retry with the same settings</TooltipContent>
+												</Tooltip>
+											)}
 											{(file.status !== "processing" && file.status !== "pending") && (
 												<>
 													<Tooltip>
@@ -996,6 +1055,24 @@ export const AudioFilesTable = memo(function AudioFilesTable({
 						</div>
 
 						<div className="h-4 w-px bg-[var(--border-subtle)] mx-1" />
+
+						{/* Bulk Retry */}
+						{Object.keys(rowSelection).some(id => data.find(f => f.id === id)?.status === "failed") && (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										variant="ghost"
+										size="icon"
+										onClick={() => handleRetry(Object.keys(rowSelection).filter(id => data.find(f => f.id === id)?.status === "failed"))}
+										disabled={bulkActionLoading || retrying}
+										className="h-9 w-9 rounded-full hover:bg-[var(--brand-light)] hover:text-[var(--brand-solid)] transition-colors"
+									>
+										<RotateCcw className="h-4 w-4" />
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent>Retry failed with the same settings</TooltipContent>
+							</Tooltip>
+						)}
 
 						{/* Bulk Transcribe */}
 						<Tooltip>

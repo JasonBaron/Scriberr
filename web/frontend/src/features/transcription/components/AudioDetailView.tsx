@@ -2,7 +2,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useParams, useNavigate } from "react-router-dom";
-import { MoreVertical, Edit2, Activity, FileText, Bot, Check, Loader2, List, AlignLeft, ArrowDownCircle, StickyNote, MessageCircle, FileImage, FileJson, Clock, AlertCircle, Users, ClipboardCopy, FileAudio, Archive } from "lucide-react";
+import { MoreVertical, Edit2, Activity, FileText, Bot, Check, Loader2, List, AlignLeft, ArrowDownCircle, StickyNote, MessageCircle, FileImage, FileJson, Clock, AlertCircle, Users, ClipboardCopy, FileAudio, Archive, RotateCcw } from "lucide-react";
 import { Header } from "@/components/Header";
 
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import { FileInfoDialog } from "./audio-detail/FileInfoDialog";
 import { ChatSidePanel } from "./ChatSidePanel";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/features/auth/hooks/useAuth";
+import { failureReason, retryJobs } from "@/features/transcription/utils/failure";
 
 // Types
 interface AudioDetailViewProps {
@@ -127,6 +128,7 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
 
     // When an automatic summary finishes, load it into the summary panel
     const queryClient = useQueryClient();
+    const [retrying, setRetrying] = useState(false);
     const prevSummaryStatus = useRef<string | undefined>(undefined);
     useEffect(() => {
         const status = audioFile?.summary_status || "";
@@ -344,6 +346,26 @@ export const AudioDetailView = function AudioDetailView({ audioId: propAudioId }
                                                     )}
                                                 </div>
                                             </div>
+                                            {audioFile.status === "failed" && (
+                                                <div className="mt-2 flex flex-wrap items-center gap-3 normal-case tracking-normal">
+                                                    <span className="text-sm text-red-600 dark:text-red-400">{failureReason(audioFile.error_message) || "Transcription failed"}</span>
+                                                    <Button size="sm" variant="outline" disabled={retrying} onClick={async () => {
+                                                        setRetrying(true);
+                                                        try {
+                                                            await retryJobs(getAuthHeaders(), [audioId || ""]);
+                                                            toast({ title: "Transcribing again with the same settings" });
+                                                            queryClient.invalidateQueries({ queryKey: ["audio", audioId] });
+                                                            queryClient.invalidateQueries({ queryKey: ["audioFiles"] });
+                                                        } catch (e) {
+                                                            toast({ title: "Retry failed", description: e instanceof Error ? e.message : undefined });
+                                                        } finally {
+                                                            setRetrying(false);
+                                                        }
+                                                    }}>
+                                                        {retrying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Retry
+                                                    </Button>
+                                                </div>
+                                            )}
                                             {audioFile.status === "completed" && (
                                                 <TagEditor audioId={audioId} tags={audioFile.tags || []} flags={audioFile.flags || []} />
                                             )}

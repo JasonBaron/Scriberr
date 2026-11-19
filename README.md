@@ -102,6 +102,10 @@ Hardware it is tested on: RTX 3060 12 GB, i5-12600K, 62 GB RAM, `Dockerfile.cuda
 | The voice scan runs before the automatic summary, so summaries use the names |
 | Naming one label with the name the voice match gave another (one person split in two) keeps both; only clean prints (enough speech, chunks that agree) teach a voice, so a short or mixed label no longer pulls it off. Voices copied from another server are kept as a seed. Rename Speakers can rerun the recording's summaries with the new names |
 | Job log covers summaries, tag-linked templates (or why none ran), title and tags, and voice scans. Built-in templates linked to an older template without auto tags get the shipped ones, so the therapy template runs on therapy recordings |
+| Retry failed transcriptions with the settings they last used: a button on a failed recording, on the list (all failed, or the selected ones), `POST /api/v1/transcription/:id/retry` and `/retry-failed`. The list shows why each recording failed |
+| Automatic retries: GPU out of memory, GPU busy, killed or network errors retry twice (after 30 s, then 2 min; `SCRIBERR_TRANSCRIBE_RETRIES`, 0 turns them off). A failed Python import repairs the environments once, then retries. Other failures are not retried. Each retry is noted in the job log |
+| Environment health check: startup imports what jobs use (WhisperX ASR, alignment and diarization; PyAnnote and torch) instead of a bare `import whisperx` that loaded nothing. A broken environment is reinstalled from the uv cache, or rebuilt with the old one kept as `.venv.broken-*` |
+| One readable console line per failed job (`Transcription failed` with the title, step and error); the full job log goes to debug |
 
 ### Next
 

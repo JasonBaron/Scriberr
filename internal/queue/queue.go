@@ -38,6 +38,7 @@ type TaskQueue struct {
 	autoScale      bool
 	lastScaleTime  time.Time
 	jobRepo        repository.JobRepository
+	retries        retryState
 }
 
 // JobProcessor defines the interface for processing jobs
@@ -109,6 +110,7 @@ func NewTaskQueue(legacyWorkers int, processor JobProcessor, jobRepo repository.
 		autoScale:      autoScale,
 		lastScaleTime:  time.Now(),
 		jobRepo:        jobRepo,
+		retries:        retryState{transient: map[string]int{}, envTried: map[string]bool{}},
 	}
 }
 
@@ -231,16 +233,12 @@ func (tq *TaskQueue) worker(id int) {
 					if err := tq.updateJobError(jobID, "Job was cancelled by user"); err != nil {
 						logger.Error("Failed to update job error", "job_id", jobID, "error", err)
 					}
+					tq.ResetRetries(jobID)
 				} else {
-					logger.Error("Job processing failed", "worker_id", id, "job_id", jobID, "error", err)
-					if err := tq.updateJobStatus(jobID, models.StatusFailed); err != nil {
-						logger.Error("Failed to update job status", "job_id", jobID, "error", err)
-					}
-					if err := tq.updateJobError(jobID, err.Error()); err != nil {
-						logger.Error("Failed to update job error", "job_id", jobID, "error", err)
-					}
+					tq.handleFailure(id, jobID, err)
 				}
 			} else {
+				tq.ResetRetries(jobID)
 				logger.Debug("Job processed successfully", "worker_id", id, "job_id", jobID)
 				if err := tq.updateJobStatus(jobID, models.StatusCompleted); err != nil {
 					logger.Error("Failed to update job status", "job_id", jobID, "error", err)

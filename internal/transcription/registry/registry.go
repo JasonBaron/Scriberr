@@ -725,3 +725,47 @@ func GetDiarizationAdapters() map[string]interfaces.DiarizationAdapter {
 	}
 	return result
 }
+
+// RepairEnvironments re-checks every enabled model's environment for real
+// (the readiness cache is cleared first) and repairs the broken ones. Used
+// when a job fails because Python could not import something. Returns the
+// errors of models that are still broken.
+func (r *ModelRegistry) RepairEnvironments(ctx context.Context, clearCache func()) []error {
+	r.prepareMu.Lock()
+	defer r.prepareMu.Unlock()
+	if clearCache != nil {
+		clearCache()
+	}
+	r.mu.RLock()
+	type item struct {
+		id      string
+		adapter environmentPreparer
+	}
+	var items []item
+	for id, a := range r.transcriptionAdapters {
+		if r.isEnabled(id) {
+			items = append(items, item{id, a})
+		}
+	}
+	for id, a := range r.diarizationAdapters {
+		if r.isEnabled(id) {
+			items = append(items, item{id, a})
+		}
+	}
+	for id, a := range r.compositeAdapters {
+		if r.isEnabled(id) {
+			items = append(items, item{id, a})
+		}
+	}
+	r.mu.RUnlock()
+
+	var errs []error
+	for _, it := range items {
+		logger.Info("Checking model environment", "model_id", it.id)
+		if err := it.adapter.PrepareEnvironment(ctx); err != nil {
+			logger.Error("Model environment is still broken", "model_id", it.id, "error", err)
+			errs = append(errs, fmt.Errorf("%s: %w", it.id, err))
+		}
+	}
+	return errs
+}
